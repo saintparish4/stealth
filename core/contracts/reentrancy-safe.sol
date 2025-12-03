@@ -8,14 +8,14 @@ contract SafeBank {
         balances[msg.sender] += msg.value;
     }
 
-    // SAFE: State change happens BEFORE external call 
+    // SAFE: State change happens BEFORE external call
     function withdraw(uint256 amount) public {
         require(balances[msg.sender] >= amount, "Insufficient balance");
-
-        // State change FIRST - follows checks-effects-interactions pattern 
+        
+        // State change FIRST - follows checks-effects-interactions pattern
         balances[msg.sender] -= amount;
-
-        // External call happens AFTER state change - safe! 
+        
+        // External call happens AFTER state change - safe!
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
     }

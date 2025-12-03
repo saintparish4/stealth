@@ -11,11 +11,11 @@ contract VulnerableBank {
     // VULNERABLE: State change happens after external call
     function withdraw(uint256 amount) public {
         require(balances[msg.sender] >= amount, "Insufficient balance");
-
+        
         // External call - attacker can re-enter here
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "Transfer failed");
-
+        
         // State change AFTER external call - reentrancy vulnerability!
         balances[msg.sender] -= amount;
     }
@@ -24,4 +24,3 @@ contract VulnerableBank {
         return balances[msg.sender];
     }
 }
-
