@@ -1,4 +1,4 @@
-use clap::{Parser};
+use clap::Parser;
 use colored::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -77,11 +77,7 @@ fn main() {
             } else if path.is_file() {
                 scan_file(&file);
             } else {
-                eprintln!(
-                    "{} Path does not exist: '{}'",
-                    "Error:".red().bold(),
-                    file
-                );
+                eprintln!("{} Path does not exist: '{}'", "Error:".red().bold(), file);
                 process::exit(1);
             }
         }
@@ -158,7 +154,11 @@ fn scan_file_internal(file_path: &Path) -> Vec<Finding> {
 
     // Initialize parser with Solidity grammar
     let mut parser = tree_sitter::Parser::new();
-    let language = unsafe { std::mem::transmute::<_, unsafe extern "C" fn() -> tree_sitter::Language>(tree_sitter_solidity::LANGUAGE)() };
+    let language = unsafe {
+        std::mem::transmute::<_, unsafe extern "C" fn() -> tree_sitter::Language>(
+            tree_sitter_solidity::LANGUAGE,
+        )()
+    };
     if let Err(e) = parser.set_language(&language) {
         eprintln!(
             "{} Failed to load Solidity grammar: {}",
@@ -205,11 +205,7 @@ fn scan_file_internal(file_path: &Path) -> Vec<Finding> {
         } else {
             format!("{} vulnerabilities", findings.len())
         };
-        println!(
-            "{} {} found:\n",
-            "Warning:".yellow().bold(),
-            count_msg
-        );
+        println!("{} {} found:\n", "Warning:".yellow().bold(), count_msg);
 
         for finding in &findings {
             finding.print();
@@ -219,11 +215,10 @@ fn scan_file_internal(file_path: &Path) -> Vec<Finding> {
     findings
 }
 
-
-// Detector 1: Reentrancy 
+// Detector 1: Reentrancy
 fn detect_reentrancy(tree: &tree_sitter::Tree, source_code: &str, findings: &mut Vec<Finding>) {
     let root_node = tree.root_node();
-    find_functions(&root_node, source_code, findings); 
+    find_functions(&root_node, source_code, findings);
 }
 
 fn find_functions(node: &tree_sitter::Node, source_code: &str, findings: &mut Vec<Finding>) {
@@ -238,10 +233,14 @@ fn find_functions(node: &tree_sitter::Node, source_code: &str, findings: &mut Ve
     }
 }
 
-fn check_function_for_reentrancy(function_node: &tree_sitter::Node, source_code: &str, findings: &mut Vec<Finding>) {
+fn check_function_for_reentrancy(
+    function_node: &tree_sitter::Node,
+    source_code: &str,
+    findings: &mut Vec<Finding>,
+) {
     let body = match find_child_by_kind(function_node, "function_body") {
         Some(b) => b,
-        None => return, 
+        None => return,
     };
 
     let statements = collect_statements(&body);
@@ -257,8 +256,13 @@ fn check_function_for_reentrancy(function_node: &tree_sitter::Node, source_code:
                         severity: Severity::High,
                         line,
                         vulnerability_type: "Reentrancy".to_string(),
-                        message: format!("External call at line {}, state change at line {}", line, state_line),
-                        suggestion: "Move state changes before external call, or add nonReentrant modifier".to_string(),
+                        message: format!(
+                            "External call at line {}, state change at line {}",
+                            line, state_line
+                        ),
+                        suggestion:
+                            "Move state changes before external call, or add nonReentrant modifier"
+                                .to_string(),
                     });
                     return;
                 }
@@ -267,22 +271,29 @@ fn check_function_for_reentrancy(function_node: &tree_sitter::Node, source_code:
     }
 }
 
-// Detector 2: Unchecked External Calls 
-fn detect_unchecked_calls(tree: &tree_sitter::Tree, source_code: &str, findings: &mut Vec<Finding>) {
+// Detector 2: Unchecked External Calls
+fn detect_unchecked_calls(
+    tree: &tree_sitter::Tree,
+    source_code: &str,
+    findings: &mut Vec<Finding>,
+) {
     let root_node = tree.root_node();
     find_unchecked_calls(&root_node, source_code, findings);
 }
 
 fn find_unchecked_calls(node: &tree_sitter::Node, source_code: &str, findings: &mut Vec<Finding>) {
-    // Look for .call() without checking return value 
+    // Look for .call() without checking return value
     if node.kind() == "expression_statement" {
-        let text = &source_code[node.byte_range()]; 
+        let text = &source_code[node.byte_range()];
 
-        // Check if this is a .call() without capturing return value 
+        // Check if this is a .call() without capturing return value
         if text.contains(".call(") || text.contains(".call{") {
-            // If the statement doesn't start with a variable assignment or require/if check 
-            let trimmed = text.trim(); 
-            if !trimmed.starts_with("(") && !trimmed.starts_with("require") && !trimmed.starts_with("if") {
+            // If the statement doesn't start with a variable assignment or require/if check
+            let trimmed = text.trim();
+            if !trimmed.starts_with("(")
+                && !trimmed.starts_with("require")
+                && !trimmed.starts_with("if")
+            {
                 let line = node.start_position().row + 1;
                 findings.push(Finding {
                     severity: Severity::Medium,
@@ -297,7 +308,7 @@ fn find_unchecked_calls(node: &tree_sitter::Node, source_code: &str, findings: &
 
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i) {
-            find_unchecked_calls(&child, source_code, findings); 
+            find_unchecked_calls(&child, source_code, findings);
         }
     }
 }
@@ -312,10 +323,12 @@ fn find_tx_origin_usage(node: &tree_sitter::Node, source_code: &str, findings: &
     let text = &source_code[node.byte_range()];
 
     // Check for tx.origin in require statements or conditionals (potential auth check)
-    if (node.kind() == "call_expression" || node.kind() == "require_statement" ||
-    node.kind() == "if_statement" || node.kind() == "binary_expression") &&
-    text.contains("tx.origin") {
-
+    if (node.kind() == "call_expression"
+        || node.kind() == "require_statement"
+        || node.kind() == "if_statement"
+        || node.kind() == "binary_expression")
+        && text.contains("tx.origin")
+    {
         // Check if its being used for comparsion (authentication pattern)
         if text.contains("==") || text.contains("!=") {
             let line = node.start_position().row + 1;
@@ -324,8 +337,9 @@ fn find_tx_origin_usage(node: &tree_sitter::Node, source_code: &str, findings: &
                 line,
                 vulnerability_type: "tx.origin Authentication".to_string(),
                 message: "Using tx.origin for authorization is unsafe".to_string(),
-                suggestion: "Use msg.sender insteaf of tx.origin for authentication checks".to_string(),
-            }); 
+                suggestion: "Use msg.sender insteaf of tx.origin for authentication checks"
+                    .to_string(),
+            });
         }
     }
 
@@ -337,47 +351,54 @@ fn find_tx_origin_usage(node: &tree_sitter::Node, source_code: &str, findings: &
 }
 
 // Helper functions
-fn find_child_by_kind<'a>(node: &'a tree_sitter::Node, kind: &str) -> Option<tree_sitter::Node<'a>> {
+fn find_child_by_kind<'a>(
+    node: &'a tree_sitter::Node,
+    kind: &str,
+) -> Option<tree_sitter::Node<'a>> {
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i) {
             if child.kind() == kind {
-                return Some(child); 
+                return Some(child);
             }
         }
     }
-    None 
+    None
 }
 
 fn collect_statements<'a>(body: &'a tree_sitter::Node) -> Vec<tree_sitter::Node<'a>> {
     let mut statements = Vec::new();
 
-    fn collect_recursive<'a>(node: tree_sitter::Node<'a>, statements: &mut Vec<tree_sitter::Node<'a>>) {
+    fn collect_recursive<'a>(
+        node: tree_sitter::Node<'a>,
+        statements: &mut Vec<tree_sitter::Node<'a>>,
+    ) {
         let kind = node.kind();
 
         if kind == "expression_statement"
-          || kind == "variable_declaration"
-          || kind == "assignment_expression"
-          || kind.ends_with("_statement") {
+            || kind == "variable_declaration"
+            || kind == "assignment_expression"
+            || kind.ends_with("_statement")
+        {
             statements.push(node);
-          }
+        }
 
-          for i in 0..node.child_count() {
+        for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                collect_recursive(child, statements); 
+                collect_recursive(child, statements);
             }
-          }
+        }
     }
 
     collect_recursive(*body, &mut statements);
-    statements 
+    statements
 }
 
 fn is_external_call(node: &tree_sitter::Node, source_code: &str) -> bool {
     let text = &source_code[node.byte_range()];
     text.contains(".call{")
-       || text.contains(".call(")
-       || text.contains(".transfer(")
-       || text.contains(".send(") 
+        || text.contains(".call(")
+        || text.contains(".transfer(")
+        || text.contains(".send(")
 }
 
 fn is_state_change(node: &tree_sitter::Node, source_code: &str) -> bool {
@@ -388,9 +409,8 @@ fn is_state_change(node: &tree_sitter::Node, source_code: &str) -> bool {
     }
 
     if node.kind() == "assignment_expression" {
-        return true; 
+        return true;
     }
 
-    text.contains("-=") || text.contains("+=") || text.contains("=") 
+    text.contains("-=") || text.contains("+=") || text.contains("=")
 }
-
