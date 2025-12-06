@@ -111,9 +111,10 @@ fn scan_file(file_path: &str) {
     // Initialize parser with Solidity grammar
     let mut parser = tree_sitter::Parser::new();
     let language = unsafe {
-        std::mem::transmute::<tree_sitter_language::LanguageFn, unsafe extern "C" fn() -> tree_sitter::Language>(
-            tree_sitter_solidity::LANGUAGE,
-        )()
+        std::mem::transmute::<
+            tree_sitter_language::LanguageFn,
+            unsafe extern "C" fn() -> tree_sitter::Language,
+        >(tree_sitter_solidity::LANGUAGE)()
     };
     if let Err(e) = parser.set_language(&language) {
         eprintln!(
@@ -493,7 +494,8 @@ fn find_child_by_kind<'a>(
 ) -> Option<tree_sitter::Node<'a>> {
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i)
-            && child.kind() == kind {
+            && child.kind() == kind
+        {
             return Some(child);
         }
     }
