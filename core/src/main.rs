@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use std::fs;
 use std::process;
-use tree_sitter;
 
 #[derive(Parser)]
 #[command(name = "stealth")]
@@ -112,7 +111,7 @@ fn scan_file(file_path: &str) {
     // Initialize parser with Solidity grammar
     let mut parser = tree_sitter::Parser::new();
     let language = unsafe {
-        std::mem::transmute::<_, unsafe extern "C" fn() -> tree_sitter::Language>(
+        std::mem::transmute::<tree_sitter_language::LanguageFn, unsafe extern "C" fn() -> tree_sitter::Language>(
             tree_sitter_solidity::LANGUAGE,
         )()
     };
@@ -493,10 +492,9 @@ fn find_child_by_kind<'a>(
     kind: &str,
 ) -> Option<tree_sitter::Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == kind {
-                return Some(child);
-            }
+        if let Some(child) = node.child(i)
+            && child.kind() == kind {
+            return Some(child);
         }
     }
     None
