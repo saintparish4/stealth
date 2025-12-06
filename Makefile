@@ -1,4 +1,4 @@
-.PHONY: help build build-release run scan scan-debug verify clean test
+.PHONY: help build build-release fmt run scan scan-debug verify clean test
 
 # Variables
 CARGO = cargo
@@ -14,6 +14,7 @@ help:
 	@echo "Available targets:"
 	@echo "  make build          - Build in debug mode"
 	@echo "  make build-release  - Build in release mode (optimized)"
+	@echo "  make fmt            - Format code with cargo fmt"
 	@echo "  make run            - Run scanner with default args"
 	@echo "  make scan [FILE=...]  - Scan a Solidity file or directory (release build)"
 	@echo "                         Defaults to contracts/ if FILE not specified"
@@ -40,6 +41,11 @@ build:
 build-release:
 	@echo "Building in release mode..."
 	cd $(CORE_DIR) && $(CARGO) build --release
+
+# Format target
+fmt:
+	@echo "Formatting code..."
+	cd $(CORE_DIR) && $(CARGO) fmt
 
 # Run targets
 run: build-release
