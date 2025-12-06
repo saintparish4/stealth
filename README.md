@@ -1,14 +1,26 @@
-# Stealth - Smart Contract Security Scanner
+# Vanguard - Smart Contract Security Scanner
 
 A Solidity security scanner that detects common vulnerabilities through static analysis.
 
 ## What It Does
 
-Stealth parses Solidity contracts and detects three categories of vulnerabilities:
+Vanguard parses Solidity contracts and detects seven categories of vulnerabilities:
 
-1. **Reentrancy** - External calls followed by state changes
-2. **Unchecked External Calls** - Missing return value checks on `.call()`
-3. **tx.origin Authentication** - Using `tx.origin` for access control
+1. **Reentrancy** [HIGH] - External calls followed by state changes
+
+2. **Unchecked External Calls** [MEDIUM] - Missing return value checks on `.call()`
+
+3. **tx.origin Authentication** [HIGH] - Using `tx.origin` for access control
+
+4. **Missing Access Control** [HIGH] - Sensitive functions without auth checks
+
+5. **Dangerous Delegatecall** [CRITICAL] - User-controlled delegatecall targets
+
+6. **Timestamp Dependence** [LOW] - Relying on `block.timestamp` for critical logic
+
+7. **Unsafe Randomness** [MEDIUM] - Using block properties for randomness
+
+Each finding includes a **confidence level** (High/Medium/Low) to help prioritize fixes.
 
 ## Installation
 
@@ -48,33 +60,40 @@ cd core && cargo run --release -- --version
 ## Example Output
 
 ```bash
-$ make scan
+$ make scan FILE=core/contracts/comprehensive-vulnerabilities.sol
 
-Stealth Security Scan Results
-Scanning directory: contracts
+Vanguard Security Scan Results
+Scanning: contracts/comprehensive-vulnerabilities.sol
 
-Found 7 file(s) to scan
+⚠ 19 vulnerabilities found:
 
-Stealth Security Scan Results
-Scanning: contracts/multiple-vulnerabilities.sol
+[HIGH] Reentrancy at line 19 (Confidence: High)
+  → External call at line 19, state change at line 22
+  Fix: Move state changes before external call, or add nonReentrant modifier
 
-Warning: 4 vulnerabilities found:
+[MEDIUM] Unchecked Call at line 27 (Confidence: High)
+  → External call return value is not checked
+  Fix: Check the return value: (bool success, ) = addr.call(...); require(success, "Call failed");
 
-[HIGH] Reentrancy at line 17
- -> External call at line 17, state change at line 20
- Fix: Move state changes before external call, or add nonReentrant modifier
+[HIGH] tx.origin Authentication at line 32 (Confidence: High)
+  → Using tx.origin for authorization is unsafe
+  Fix: Use msg.sender instead of tx.origin for authentication checks
 
-[MEDIUM] Unchecked Call at line 27
- -> External call return value is not checked
- Fix: Check the return value: (bool success, ) = addr.call(...); require(sucess, "Call failed");
+[HIGH] Missing Access Control at line 37 (Confidence: Medium)
+  → Sensitive function may lack access control
+  Fix: Add require(msg.sender == owner) or use an access control modifier
 
-[HIGH] tx.origin Authentication at line 32
- -> Using tx.origin for authorization is unsafe
- Fix: Use msg.sender insteaf of tx.origin for authentication checks
+[CRITICAL] Dangerous Delegatecall at line 43 (Confidence: Medium)
+  → delegatecall to potentially user-controlled address
+  Fix: Ensure delegatecall target is hardcoded or strictly validated. Consider using library pattern.
 
-==================================================
+[LOW] Timestamp Dependence at line 48 (Confidence: Medium)
+  → Using block.timestamp for critical logic can be manipulated by miners
+  Fix: Avoid using block.timestamp for critical decisions. If needed, allow ~15 minute tolerance.
 
-Summary: Scanned 7 file(s), found 8 total vulnerability/vulnerabilities
+[MEDIUM] Unsafe Randomness at line 53 (Confidence: High)
+  → Using block properties for randomness is predictable
+  Fix: Use Chainlink VRF or commit-reveal scheme for true randomness
 ```
 
 ## Test Contracts
@@ -93,8 +112,24 @@ The `core/contracts/` directory contains examples for each vulnerability type:
 - `tx-origin-vulnerable.sol` - Uses tx.origin for auth ❌
 - `tx-origin-safe.sol` - Uses msg.sender for auth ✅
 
+### Access Control
+- `access-control-safe.sol` - Proper access control modifiers ✅
+
+### Delegatecall
+- `delegatecall-vulnerable.sol` - User-controlled delegatecall ❌
+- `delegatecall-safe.sol` - Hardcoded library address ✅
+
+### Timestamp Dependence
+- `timestamp-vulnerable.sol` - Exact timestamp checks ❌
+- `timestamp-safe.sol` - Reasonable time tolerance ✅
+
+### Unsafe Randomness
+- `randomness-vulnerable.sol` - Block properties for RNG ❌
+- `randomness-safe.sol` - Commit-reveal scheme ✅
+
 ### Combined
-- `multiple-vulnerabilities.sol` - All three vulnerability types
+- `multiple-vulnerabilities.sol` - First 3 vulnerability types
+- `comprehensive-vulnerabilities.sol` - All 7 vulnerability types
 
 ## Architecture
 
@@ -113,6 +148,7 @@ Stealth uses pattern matching on the Abstract Syntax Tree (AST):
 1. Find all function definitions
 2. Collect statements in order
 3. Flag external calls followed by state changes
+4. High confidence for balance mapping changes, medium for others
 
 **Unchecked Call Detection:**
 1. Find expression statements containing `.call()`
@@ -124,36 +160,41 @@ Stealth uses pattern matching on the Abstract Syntax Tree (AST):
 2. Flag usage of `tx.origin` in equality checks
 3. Suggest `msg.sender` alternative
 
+**Access Control Detection:**
+1. Find sensitive functions (withdraw, destroy, selfdestruct, etc.)
+2. Check for require statements with msg.sender or modifiers
+3. Flag functions lacking protection
+
+**Delegatecall Detection:**
+1. Find delegatecall usage in code
+2. Flag as potentially dangerous (needs manual review)
+3. Recommend hardcoded addresses
+
+**Timestamp Detection:**
+1. Find block.timestamp in conditionals
+2. Flag exact timing dependencies
+3. Suggest reasonable tolerance ranges
+
+**Randomness Detection:**
+1. Find block properties (blockhash, block.number)
+2. Check for modulo operations (% operator)
+3. Recommend Chainlink VRF or commit-reveal
+
+### Confidence Levels
+
+Each finding includes a confidence rating:
+- **High**: Very likely a real vulnerability
+- **Medium**: Potentially vulnerable, needs review
+- **Low**: May be intentional, check context
+
+This helps prioritize which findings to fix first.
+
 ### Severity Levels
+- **CRITICAL** - Dangerous delegatecall (complete contract takeover possible)
+- **HIGH** - Reentrancy, tx.origin auth, missing access control
+- **MEDIUM** - Unchecked external calls, unsafe randomness
+- **LOW** - Timestamp dependence
 
-- **CRITICAL** - Reserved for future use
-- **HIGH** - Reentrancy, tx.origin auth
-- **MEDIUM** - Unchecked external calls
-- **LOW** - Reserved for future use
-
-## Development Status
-
-- ✅ Proper CLI with clap
-- ✅ Three detector types
-- ✅ Structured Finding system
-- ✅ Colored terminal output
-- ✅ Error handling
-- ✅ Test contracts for all detectors
-- ✅ Directory scanning support
-- ✅ Makefile integration for easy usage
-
-## Known Limitations
-
-- Solidity 0.8.x focus (older versions may have different patterns)
-- Pattern matching only (no dataflow analysis)
-- No cross-function analysis for reentrancy
-
-## Roadmap
-
-- JSON output format for tooling integration
-- Additional detectors based on real-world usage
-- Improved pattern matching to reduce false positives
-- Better handling of duplicate findings
 
 ## The Vulnerabilities Explained
 
@@ -202,5 +243,72 @@ require(tx.origin == owner);  // Can be bypassed via intermediary contract
 require(msg.sender == owner);  // Direct caller check
 ```
 
-## Contributing
-Feedback and suggestions welcome!
+### 4. Missing Access Control
+
+Sensitive functions (withdraw, destroy, selfdestruct) without proper authorization checks can be called by anyone.
+
+**Vulnerable:**
+```solidity
+function withdraw() public {  // Anyone can call this!
+    payable(msg.sender).transfer(address(this).balance);
+}
+```
+
+**Safe:**
+```solidity
+function withdraw() public {
+    require(msg.sender == owner, "Not authorized");
+    payable(msg.sender).transfer(address(this).balance);
+}
+```
+
+### 5. Dangerous Delegatecall
+
+`delegatecall` executes code in the context of the calling contract. If the target address is user-controlled, an attacker can modify the contract's storage.
+
+**Vulnerable:**
+```solidity
+function execute(address target, bytes memory data) public {
+    target.delegatecall(data);  // Attacker controls target!
+}
+```
+
+**Safe:**
+```solidity
+address immutable trustedLibrary = 0x...;  // Hardcoded
+function execute(bytes memory data) public {
+    trustedLibrary.delegatecall(data);  // Only trusted code
+}
+```
+
+### 6. Timestamp Dependence
+
+Miners can manipulate `block.timestamp` within a ~15 second window. Using exact timestamps for critical logic is dangerous.
+
+**Vulnerable:**
+```solidity
+require(block.timestamp % 15 == 0);  // Exact timing
+```
+
+**Safe:**
+```solidity
+require(block.timestamp >= deadline);  // Reasonable tolerance
+```
+
+### 7. Unsafe Randomness
+
+Block properties (blockhash, block.number, block.difficulty) are predictable and can be manipulated by miners.
+
+**Vulnerable:**
+```solidity
+uint random = uint(blockhash(block.number - 1)) % 100;  // Predictable!
+```
+
+**Safe:**
+```solidity
+// Use Chainlink VRF for true randomness, or:
+// Implement commit-reveal scheme
+bytes32 public commitment;
+function commit(bytes32 hash) public { commitment = hash; }
+function reveal(uint nonce) public { /* verify and use */ }
+```

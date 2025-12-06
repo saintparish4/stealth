@@ -50,11 +50,37 @@ FILE ?= contracts
 
 scan: build-release
 	@echo "Scanning $(FILE)..."
-	cd $(CORE_DIR) && $(CARGO) run --release -- scan $(FILE)
+	@cd $(CORE_DIR) && \
+	if [ -d "$(FILE)" ]; then \
+		for sol_file in $(FILE)/*.sol; do \
+			if [ -f "$$sol_file" ]; then \
+				echo ""; \
+				echo "========================================"; \
+				echo "Scanning: $$sol_file"; \
+				echo "========================================"; \
+				$(CARGO) run --release -- scan $$sol_file; \
+			fi; \
+		done; \
+	else \
+		$(CARGO) run --release -- scan $(FILE); \
+	fi
 
 scan-debug: build
 	@echo "Scanning $(FILE)..."
-	cd $(CORE_DIR) && $(CARGO) run -- scan $(FILE)
+	@cd $(CORE_DIR) && \
+	if [ -d "$(FILE)" ]; then \
+		for sol_file in $(FILE)/*.sol; do \
+			if [ -f "$$sol_file" ]; then \
+				echo ""; \
+				echo "========================================"; \
+				echo "Scanning: $$sol_file"; \
+				echo "========================================"; \
+				$(CARGO) run -- scan $$sol_file; \
+			fi; \
+		done; \
+	else \
+		$(CARGO) run -- scan $(FILE); \
+	fi
 
 # Test/Verify targets
 verify: build-release
