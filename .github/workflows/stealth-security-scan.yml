@@ -1,0 +1,100 @@
+name: Stealth Security Scan
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        override: true
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('core/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('core/Cargo.lock') }}
+    
+    - name: Cache target directory
+      uses: actions/cache@v4
+      with:
+        path: core/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('core/Cargo.lock') }}
+    
+    - name: Build Stealth Scanner
+      run: cd core && cargo build --release
+    
+    - name: Run Stealth Scan
+      id: scan
+      run: |
+        cd core && cargo run --release -- scan ./contracts --recursive --format json > ../scan-results.json
+      continue-on-error: true
+    
+    - name: Upload Scan Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: stealth-scan-results
+        path: scan-results.json
+    
+    - name: Check for Critical Vulnerabilities
+      run: |
+        if [ ${{ steps.scan.outcome }} == 'failure' ]; then
+          echo "⚠️ Stealth found vulnerabilities in your smart contracts"
+          cat scan-results.json
+          exit 1
+        fi
+    
+    - name: Comment PR with Results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const results = JSON.parse(fs.readFileSync('scan-results.json', 'utf8'));
+          
+          let comment = '## 🛡️ Stealth Security Scan Results\n\n';
+          comment += `**Files scanned:** ${results.files_scanned}\n\n`;
+          
+          if (results.vulnerabilities === 0) {
+            comment += '✅ No vulnerabilities detected!\n';
+          } else {
+            comment += `⚠️ Found ${results.vulnerabilities} vulnerabilities\n\n`;
+            comment += `### Statistics\n`;
+            comment += `- **Critical:** ${results.statistics.critical}\n`;
+            comment += `- **High:** ${results.statistics.high}\n`;
+            comment += `- **Medium:** ${results.statistics.medium}\n`;
+            comment += `- **Low:** ${results.statistics.low}\n\n`;
+            
+            if (results.findings.length > 0) {
+              comment += '### Details\n';
+              results.findings.forEach(finding => {
+                comment += `- **[${finding.severity}]** ${finding.vulnerability_type} at line ${finding.line} (Confidence: ${finding.confidence})\n`;
+                comment += `  - ${finding.message}\n`;
+                comment += `  - **Fix:** ${finding.suggestion}\n\n`;
+              });
+            }
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+

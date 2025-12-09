@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
 use colored::*;
+use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
 use std::process;
+use tree_sitter;
+use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(name = "stealth")]
@@ -18,10 +22,18 @@ enum Commands {
     Scan {
         /// Path to the Solidity file to scan
         file: String,
+
+        /// Output format: terminal (default) or JSON
+        #[arg(short, long, default_value = "terminal")]
+        format: String,
+
+        /// Recursively scan directories
+        #[arg(short, long, default_value_t = false)]
+        recursive: bool,
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 enum Severity {
     Critical,
     High,
@@ -40,7 +52,7 @@ impl Severity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 enum Confidence {
     High,
@@ -58,7 +70,7 @@ impl Confidence {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Finding {
     severity: Severity,
     confidence: Confidence,
@@ -66,6 +78,27 @@ struct Finding {
     vulnerability_type: String,
     message: String,
     suggestion: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ScanResult {
+    files_scanned: usize,
+    vulnerabilities: usize,
+    findings: Vec<Finding>,
+    statistics: Statistics,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Statistics {
+    critical: usize,
+    high: usize,
+    medium: usize,
+    low: usize,
+    confidence_high: usize,
+    confidence_medium: usize,
+    confidence_low: usize,
 }
 
 impl Finding {
@@ -87,13 +120,126 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Scan { file } => {
-            scan_file(&file);
+        Commands::Scan {
+            file,
+            format,
+            recursive,
+        } => {
+            let output_format = match format.as_str() {
+                "json" => OutputFormat::Json,
+                "terminal" => OutputFormat::Terminal,
+                _ => {
+                    eprintln!(
+                        "{} Invalid format '{}'. Use 'terminal' or 'json'",
+                        "Error:".red().bold(),
+                        format
+                    );
+                    process::exit(1);
+                }
+            };
+
+            scan_path(&file, recursive, output_format);
         }
     }
 }
 
-fn scan_file(file_path: &str) {
+#[derive(Debug, Clone)]
+enum OutputFormat {
+    Terminal,
+    Json,
+}
+
+fn scan_path(path: &str, recursive: bool, format: OutputFormat) {
+    let path_buf = PathBuf::from(path);
+
+    if !path_buf.exists() {
+        eprintln!("{} Path '{}' does not exist", "Error:".red().bold(), path);
+        process::exit(1);
+    }
+
+    let mut all_findings = Vec::new();
+    let mut files_scanned = 0;
+
+    if path_buf.is_file() {
+        // Single file scan
+        if let Some(extension) = path_buf.extension() {
+            if extension == "sol" {
+                let findings = scan_file(path);
+                files_scanned = 1;
+                all_findings.extend(findings);
+            } else {
+                eprintln!("{} File must have .sol extension", "Error:".red().bold());
+                process::exit(1);
+            }
+        }
+    } else if path_buf.is_dir() {
+        // Directory scan
+        if recursive {
+            for entry in WalkDir::new(&path_buf)
+                .follow_links(true)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
+                let file_path = entry.path();
+                if file_path.is_file() {
+                    if let Some(extension) = file_path.extension() {
+                        if extension == "sol" {
+                            let findings = scan_file(file_path.to_str().unwrap());
+                            files_scanned += 1;
+
+                            // Add file path to findings
+                            let mut findings_with_path: Vec<Finding> = findings
+                                .into_iter()
+                                .map(|mut f| {
+                                    f.file_path = Some(file_path.display().to_string());
+                                    f
+                                })
+                                .collect();
+
+                            all_findings.append(&mut findings_with_path);
+                        }
+                    }
+                }
+            }
+        } else {
+            eprintln!(
+                "{} Path is a directory. Use --recursive to scan directories",
+                "Error:".red().bold()
+            );
+            process::exit(1);
+        }
+    }
+
+    // Calculate statistics
+    let statistics = calculate_statistics(&all_findings);
+
+    // Output results based on format
+    match format {
+        OutputFormat::Terminal => {
+            print_terminal_output(path, files_scanned, &all_findings, &statistics);
+        }
+        OutputFormat::Json => {
+            print_json_output(files_scanned, &all_findings, &statistics);
+        }
+    }
+
+    // Exit with appropriate code for CI/CD
+    if has_critical_findings(&all_findings) {
+        process::exit(2); // Critical vulnerabilities found
+    } else if !all_findings.is_empty() {
+        process::exit(1); // Non-critical vulnerabilities found
+    }
+    // Exit 0 if no vulnerabilities found
+    process::exit(0);
+}
+
+fn has_critical_findings(findings: &[Finding]) -> bool {
+    findings
+        .iter()
+        .any(|f| matches!(f.severity, Severity::Critical))
+}
+
+fn scan_file(file_path: &str) -> Vec<Finding> {
     // Read the Solidity file
     let source_code = match fs::read_to_string(file_path) {
         Ok(content) => content,
@@ -104,7 +250,7 @@ fn scan_file(file_path: &str) {
                 file_path,
                 e
             );
-            process::exit(1);
+            return Vec::new();
         }
     };
 
@@ -122,7 +268,7 @@ fn scan_file(file_path: &str) {
             "Error:".red().bold(),
             e
         );
-        process::exit(1);
+        return Vec::new();
     }
 
     // Parse the source code
@@ -131,9 +277,9 @@ fn scan_file(file_path: &str) {
         None => {
             eprintln!(
                 "{} Failed to parse Solidity file. The syntax may be invalid.",
-                "Error:".red().bold()
+                file_path
             );
-            process::exit(1);
+            return Vec::new();
         }
     };
 
@@ -148,22 +294,118 @@ fn scan_file(file_path: &str) {
     detect_timestamp_dependence(&tree, &source_code, &mut findings);
     detect_unsafe_random(&tree, &source_code, &mut findings);
 
-    // Display results
+    findings
+}
+
+fn calculate_statistics(findings: &[Finding]) -> Statistics {
+    let mut stats = Statistics {
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+        confidence_high: 0,
+        confidence_medium: 0,
+        confidence_low: 0,
+    };
+
+    for finding in findings {
+        match finding.severity {
+            Severity::Critical => stats.critical += 1,
+            Severity::High => stats.high += 1,
+            Severity::Medium => stats.medium += 1,
+            Severity::Low => stats.low += 1,
+        }
+
+        match finding.confidence {
+            Confidence::High => stats.confidence_high += 1,
+            Confidence::Medium => stats.confidence_medium += 1,
+            Confidence::Low => stats.confidence_low += 1,
+        }
+    }
+
+    stats
+}
+
+fn print_terminal_output(
+    path: &str,
+    files_scanned: usize,
+    findings: &[Finding],
+    statistics: &Statistics,
+) {
     println!("\n{}", "Vanguard Security Scan Results".bold().underline());
-    println!("{} {}\n", "Scanning:".bold(), file_path);
+    println!("{} {}\n", "Scanning:".bold(), path);
 
     if findings.is_empty() {
         println!("{} No vulnerabilities detected.\n", "✓".green().bold());
     } else {
-        let count_msg = if findings.len() == 1 {
+        let vuln_text = if findings.len() == 1 {
             "1 vulnerability".to_string()
         } else {
             format!("{} vulnerabilities", findings.len())
         };
-        println!("{} {} found:\n", "⚠".yellow().bold(), count_msg);
+        println!("{} {} found:\n", "⚠".yellow().bold(), vuln_text);
 
         for finding in findings {
             finding.print();
+        }
+
+        // Print statistics
+        println!("\n{}", "Statistics Summary".bold().underline());
+        println!("Files scanned: {}", files_scanned);
+        println!("Total vulnerabilities: {}", findings.len());
+        println!("\nBy Severity:");
+        if statistics.critical > 0 {
+            println!("  {}: {}", "Critical".red().bold(), statistics.critical);
+        }
+        if statistics.high > 0 {
+            println!("  {}: {}", "High".red(), statistics.high);
+        }
+        if statistics.medium > 0 {
+            println!("  {}: {}", "Medium".yellow(), statistics.medium);
+        }
+        if statistics.low > 0 {
+            println!("  {}: {}", "Low".blue(), statistics.low);
+        }
+
+        println!("\nBy Confidence:");
+        if statistics.confidence_high > 0 {
+            println!("  High confidence: {}", statistics.confidence_high);
+        }
+        if statistics.confidence_medium > 0 {
+            println!("  Medium confidence: {}", statistics.confidence_medium);
+        }
+        if statistics.confidence_low > 0 {
+            println!("  Low confidence: {}", statistics.confidence_low);
+        }
+        println!();
+    }
+}
+
+fn print_json_output(files_scanned: usize, findings: &[Finding], statistics: &Statistics) {
+    let result = ScanResult {
+        files_scanned,
+        vulnerabilities: findings.len(),
+        findings: findings.to_vec(),
+        statistics: Statistics {
+            critical: statistics.critical,
+            high: statistics.high,
+            medium: statistics.medium,
+            low: statistics.low,
+            confidence_high: statistics.confidence_high,
+            confidence_medium: statistics.confidence_medium,
+            confidence_low: statistics.confidence_low,
+        },
+    };
+
+    match serde_json::to_string_pretty(&result) {
+        Ok(json) => println!("{}", json),
+        Err(e) => {
+            eprintln!(
+                "{} Failed to serialize results to JSON: {}",
+                "Error:".red().bold(),
+                e
+            );
+            process::exit(1);
         }
     }
 }
@@ -224,6 +466,7 @@ fn check_function_for_reentrancy(
                         suggestion:
                             "Move state changes before external call, or add nonReentrant modifier"
                                 .to_string(),
+                        file_path: None,
                     });
                     return;
                 }
@@ -263,6 +506,7 @@ fn find_unchecked_calls(node: &tree_sitter::Node, source_code: &str, findings: &
                     vulnerability_type: "Unchecked Call".to_string(),
                     message: "External call return value is not checked".to_string(),
                     suggestion: "Check the return value: (bool success, ) = addr.call(...); require(success, \"Call failed\");".to_string(),
+                    file_path: None,
                 });
             }
         }
@@ -302,6 +546,7 @@ fn find_tx_origin_usage(node: &tree_sitter::Node, source_code: &str, findings: &
                 message: "Using tx.origin for authorization is unsafe".to_string(),
                 suggestion: "Use msg.sender instead of tx.origin for authentication checks"
                     .to_string(),
+                file_path: None,
             });
         }
     }
@@ -358,6 +603,7 @@ fn find_missing_access_control(
                     suggestion:
                         "Add require(msg.sender == owner) or use an access control modifier"
                             .to_string(),
+                    file_path: None,
                 });
             }
         }
@@ -401,6 +647,7 @@ fn find_dangerous_delegatecall(
                 vulnerability_type: "Dangerous Delegatecall".to_string(),
                 message: "delegatecall to potentially user-controlled address".to_string(),
                 suggestion: "Ensure delegatecall target is hardcoded or strictly validated. Consider using library pattern.".to_string(),
+                file_path: None,
             });
         }
     }
@@ -443,6 +690,7 @@ fn find_timestamp_dependence(
             vulnerability_type: "Timestamp Dependence".to_string(),
             message: "Using block.timestamp for critical logic can be manipulated by miners".to_string(),
             suggestion: "Avoid using block.timestamp for critical decisions. If needed, allow ~15 minute tolerance.".to_string(),
+            file_path: None,
         });
     }
 
@@ -477,6 +725,7 @@ fn find_unsafe_random(node: &tree_sitter::Node, source_code: &str, findings: &mu
             vulnerability_type: "Unsafe Randomness".to_string(),
             message: "Using block properties for randomness is predictable".to_string(),
             suggestion: "Use Chainlink VRF or commit-reveal scheme for true randomness".to_string(),
+            file_path: None,
         });
     }
 
@@ -493,10 +742,10 @@ fn find_child_by_kind<'a>(
     kind: &str,
 ) -> Option<tree_sitter::Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i)
-            && child.kind() == kind
-        {
-            return Some(child);
+        if let Some(child) = node.child(i) {
+            if child.kind() == kind {
+                return Some(child);
+            }
         }
     }
     None
@@ -504,30 +753,26 @@ fn find_child_by_kind<'a>(
 
 fn collect_statements<'a>(body: &'a tree_sitter::Node) -> Vec<tree_sitter::Node<'a>> {
     let mut statements = Vec::new();
-
-    fn collect_recursive<'a>(
-        node: tree_sitter::Node<'a>,
-        statements: &mut Vec<tree_sitter::Node<'a>>,
-    ) {
-        let kind = node.kind();
-
-        if kind == "expression_statement"
-            || kind == "variable_declaration"
-            || kind == "assignment_expression"
-            || kind.ends_with("_statement")
-        {
-            statements.push(node);
-        }
-
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                collect_recursive(child, statements);
-            }
-        }
-    }
-
     collect_recursive(*body, &mut statements);
     statements
+}
+
+fn collect_recursive<'a>(node: tree_sitter::Node<'a>, statements: &mut Vec<tree_sitter::Node<'a>>) {
+    let kind = node.kind();
+
+    if kind == "expression_statement"
+        || kind == "variable_declaration"
+        || kind == "assignment_expression"
+        || kind.ends_with("_statement")
+    {
+        statements.push(node);
+    }
+
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            collect_recursive(child, statements);
+        }
+    }
 }
 
 fn is_external_call(node: &tree_sitter::Node, source_code: &str) -> bool {
