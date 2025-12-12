@@ -2,25 +2,45 @@
 
 A Solidity security scanner that detects common vulnerabilities through static analysis.
 
-## What It Does
+---
 
-Stealth parses Solidity contracts and detects seven categories of vulnerabilities:
+## Overview
 
-1. **Reentrancy** [HIGH] - External calls followed by state changes
+**Stealth** parses Solidity contracts and identifies security issues before deployment, providing confidence levels to help developers prioritize fixes. The tool supports both single file and recursive directory scanning, with output in terminal or JSON formats for easy CI/CD integration.
 
-2. **Unchecked External Calls** [MEDIUM] - Missing return value checks on `.call()`
+---
 
-3. **tx.origin Authentication** [HIGH] - Using `tx.origin` for access control
+## Features
 
-4. **Missing Access Control** [HIGH] - Sensitive functions without auth checks
+| Category | Severity | Description |
+|----------|----------|-------------|
+| **Reentrancy Detection** | HIGH | Identifies external calls followed by state changes |
+| **Unchecked External Calls** | MEDIUM | Catches missing return value checks on `.call()` |
+| **tx.origin Authentication** | HIGH | Flags insecure use of `tx.origin` for access control |
+| **Missing Access Control** | HIGH | Detects sensitive functions without auth checks |
+| **Dangerous Delegatecall** | CRITICAL | Warns about user-controlled delegatecall targets |
+| **Timestamp Dependence** | LOW | Flags reliance on `block.timestamp` for critical logic |
+| **Unsafe Randomness** | MEDIUM | Detects use of block properties for randomness |
 
-5. **Dangerous Delegatecall** [CRITICAL] - User-controlled delegatecall targets
+**Additional Capabilities:**
+- **Confidence Scoring** — Each finding includes High/Medium/Low confidence levels
+- **Recursive Scanning** — Analyze entire contract directories at once
+- **Multiple Output Formats** — Terminal (colored) or JSON for tooling
+- **CI/CD Ready** — Exit codes (0/1/2) for pipeline integration
+- **Fast Analysis** — Built for speed with release builds
 
-6. **Timestamp Dependence** [LOW] - Relying on `block.timestamp` for critical logic
+---
 
-7. **Unsafe Randomness** [MEDIUM] - Using block properties for randomness
+## Tech Stack
 
-Each finding includes a **confidence level** (High/Medium/Low) to help prioritize fixes.
+| Technology | Purpose |
+|------------|---------|
+| **Rust** | Core scanner engine (performance & safety) |
+| **Cargo** | Build system & package manager |
+| **Solidity** | Target language for vulnerability detection |
+| **GitHub Actions** | CI/CD workflow support |
+
+---
 
 ## Installation
 
@@ -41,6 +61,8 @@ cargo install --path .
 # After installation, use 'stealth' command directly
 stealth scan ./contracts --recursive
 ```
+
+---
 
 ## Usage
 
@@ -76,11 +98,13 @@ make scan-debug                              # Faster compilation for testing
 
 ### CI/CD Integration
 
-Vanguard provides exit codes for CI/CD pipelines:
+Stealth provides exit codes for CI/CD pipelines:
 
-- `0`: No vulnerabilities found
-- `1`: Non-critical vulnerabilities found  
-- `2`: Critical vulnerabilities found
+| Exit Code | Meaning |
+|-----------|---------|
+| `0` | No vulnerabilities found |
+| `1` | Non-critical vulnerabilities found |
+| `2` | Critical vulnerabilities found |
 
 ```bash
 # In your CI/CD script
@@ -140,6 +164,8 @@ Options:
   -h, --help                Print help
   -V, --version             Print version
 ```
+
+---
 
 ## License
 
