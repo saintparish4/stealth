@@ -1,0 +1,65 @@
+feat: Expand to 13 detectors with improved accuracy and code organization
+
+Major update expanding vulnerability detection from 7 to 13 comprehensive
+detectors, fixing duplicate detection issues, eliminating false positives,
+and improving code organization.
+
+## New Detectors Added
+
+- Integer Overflow/Underflow: Detects unsafe arithmetic in Solidity <0.8
+  and unchecked blocks
+- Flash Loan Vulnerability: Identifies price manipulation patterns and
+  unvalidated callbacks
+- Storage Collision (Proxy): Detects missing storage gaps and unprotected
+  initializers in upgradeable contracts
+- Front-Running Susceptibility: Catches missing slippage protection,
+  approval race conditions, and front-runnable auctions
+- DoS via Unbounded Loops: Detects gas griefing patterns and external
+  calls in loops
+- Unchecked ERC20 Return Values: Flags missing SafeERC20 usage
+
+## Improvements
+
+### Detection Accuracy
+- Fixed duplicate detection in tx.origin and unsafe randomness detectors
+- Eliminated false positives for user functions (stake, deposit, claim, etc.)
+- Enhanced slippage detection for withdraw functions using price calculations
+- Added _transfer() detection in loops for internal ERC20 transfers
+- Improved approve() front-running detection with better pattern matching
+
+### Code Organization
+- Organized code with clear section headers (// ============================================================================)
+- Consolidated heuristics module into main.rs for better maintainability
+- Added comprehensive inline documentation for all detector sections
+
+### Test Coverage
+- Added new-detectors-test.sol with comprehensive test cases
+- Added production-governance-token.sol demonstrating mixed vulnerability patterns
+- Added production-staking-vault.sol (clean reference implementation)
+- Added production-yield-aggregator.sol (hidden vulnerabilities example)
+
+## Documentation Updates
+
+- Updated README.md with all 13 detectors and new features
+- Updated PRODUCTION-CONTRACTS.md with accurate scan results
+- Added guidance for addressing detected patterns
+
+## Technical Details
+
+- Detectors now check at appropriate AST node levels to avoid duplicates
+- User function exclusion list prevents false positives on legitimate patterns
+- Enhanced pattern matching for slippage protection in price-based withdrawals
+- Improved array iteration detection for unbounded loop patterns
+
+## Breaking Changes
+
+None - all changes are backward compatible.
+
+## Files Changed
+
+- core/src/main.rs: Major refactor with 6 new detectors and improvements
+- core/src/heuristics.rs: Deleted (consolidated into main.rs)
+- README.md: Updated feature list and documentation
+- core/contracts/PRODUCTION-CONTRACTS.md: Updated with accurate results
+- Multiple test contract files: Updated and new test cases added
+

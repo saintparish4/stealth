@@ -18,8 +18,12 @@ Stealth parses Solidity contracts and identifies security issues before deployme
 
 ### What's New in v0.4.0
 
+- **13 Comprehensive Detectors**: Expanded from 7 to 13 vulnerability detectors covering modern DeFi attack vectors
 - **Self-Service Pattern Detection**: Automatically identifies user-operated functions (withdraw, claim, stake) to reduce false positives on access control checks
 - **Visibility-Aware Analysis**: Adjusts reentrancy confidence based on function visibility (private/internal functions are lower risk)
+- **Flash Loan Vulnerability Detection**: Identifies price manipulation and unvalidated callback patterns
+- **Front-Running Detection**: Catches missing slippage protection, approval race conditions, and front-runnable auctions
+- **DoS via Unbounded Loops**: Detects gas griefing patterns and external calls in loops
 - **Enhanced Detectors**: Improved accuracy across all vulnerability categories
 - **Context-Aware Heuristics**: Analysis that understands modern DeFi patterns
 
@@ -36,6 +40,12 @@ Stealth parses Solidity contracts and identifies security issues before deployme
 | **Dangerous Delegatecall** | CRITICAL | Warns about user-controlled delegatecall targets | Parameter analysis for user control |
 | **Timestamp Dependence** | MEDIUM-HIGH | Flags dangerous timestamp patterns (modulo, equality) | View/pure function awareness |
 | **Unsafe Randomness** | HIGH | Detects use of block properties for randomness | Pattern-based detection (keccak256, blockhash) |
+| **Integer Overflow/Underflow** | HIGH | Detects unsafe arithmetic in Solidity <0.8 and unchecked blocks | Version-aware detection |
+| **Flash Loan Vulnerability** | HIGH | Identifies price manipulation and unvalidated callbacks | Spot price vs TWAP detection |
+| **Storage Collision (Proxy)** | CRITICAL-HIGH | Detects missing storage gaps and unprotected initializers | Upgradeable contract patterns |
+| **Front-Running Susceptibility** | MEDIUM-HIGH | Catches missing slippage protection, approval race conditions | Swap/withdraw pattern analysis |
+| **DoS via Unbounded Loops** | HIGH | Detects gas griefing and external calls in loops | Array iteration analysis |
+| **Unchecked ERC20 Return Values** | HIGH | Flags missing SafeERC20 usage | Transfer/approve pattern detection |
 
 **Smart Analysis Capabilities:**
 - **Self-Service Pattern Detection** - Understands DeFi patterns where users manage their own funds (withdraw, claim, stake) to avoid false positives
