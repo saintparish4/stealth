@@ -1,33 +1,50 @@
 # Stealth - Smart Contract Security Scanner
 
-A Solidity security scanner that detects common vulnerabilities through static analysis.
+**Version 0.4.0**
+
+A Solidity security scanner that detects common vulnerabilities through static analysis with intelligent pattern recognition.
+
+---
+
+## Why Stealth?
+
+I built Stealth to address false positives that plague other security scanners. Traditional tools flag legitimate DeFi patterns (like user withdrawals and staking) as vulnerabilities, creating noise that obscures real issues. Stealth understands modern smart contract patterns and provides accurate, actionable security insights.
 
 ---
 
 ## Overview
 
-**Stealth** parses Solidity contracts and identifies security issues before deployment, providing confidence levels to help developers prioritize fixes. The tool supports both single file and recursive directory scanning, with output in terminal or JSON formats for easy CI/CD integration.
+Stealth parses Solidity contracts and identifies security issues before deployment. It provides confidence levels to help you prioritize fixes and supports both single file and recursive directory scanning, with output in terminal or JSON formats for CI/CD integration.
+
+### What's New in v0.4.0
+
+- **Self-Service Pattern Detection**: Automatically identifies user-operated functions (withdraw, claim, stake) to reduce false positives on access control checks
+- **Visibility-Aware Analysis**: Adjusts reentrancy confidence based on function visibility (private/internal functions are lower risk)
+- **Enhanced Detectors**: Improved accuracy across all vulnerability categories
+- **Context-Aware Heuristics**: Analysis that understands modern DeFi patterns
 
 ---
 
 ## Features
 
-| Category | Severity | Description |
-|----------|----------|-------------|
-| **Reentrancy Detection** | HIGH | Identifies external calls followed by state changes |
-| **Unchecked External Calls** | MEDIUM | Catches missing return value checks on `.call()` |
-| **tx.origin Authentication** | HIGH | Flags insecure use of `tx.origin` for access control |
-| **Missing Access Control** | HIGH | Detects sensitive functions without auth checks |
-| **Dangerous Delegatecall** | CRITICAL | Warns about user-controlled delegatecall targets |
-| **Timestamp Dependence** | LOW | Flags reliance on `block.timestamp` for critical logic |
-| **Unsafe Randomness** | MEDIUM | Detects use of block properties for randomness |
+| Category | Severity | Description | Enhancements |
+|----------|----------|-------------|--------------|
+| **Reentrancy Detection** | HIGH | Identifies external calls followed by state changes | Visibility-aware confidence scoring |
+| **Unchecked External Calls** | MEDIUM | Catches missing return value checks on `.call()` | High confidence pattern matching |
+| **tx.origin Authentication** | HIGH | Flags insecure use of `tx.origin` for access control | Definitive anti-pattern detection |
+| **Missing Access Control** | HIGH | Detects sensitive functions without auth checks | Self-service pattern recognition |
+| **Dangerous Delegatecall** | CRITICAL | Warns about user-controlled delegatecall targets | Parameter analysis for user control |
+| **Timestamp Dependence** | MEDIUM-HIGH | Flags dangerous timestamp patterns (modulo, equality) | View/pure function awareness |
+| **Unsafe Randomness** | HIGH | Detects use of block properties for randomness | Pattern-based detection (keccak256, blockhash) |
 
-**Additional Capabilities:**
-- **Confidence Scoring** — Each finding includes High/Medium/Low confidence levels
-- **Recursive Scanning** — Analyze entire contract directories at once
-- **Multiple Output Formats** — Terminal (colored) or JSON for tooling
-- **CI/CD Ready** — Exit codes (0/1/2) for pipeline integration
-- **Fast Analysis** — Built for speed with release builds
+**Smart Analysis Capabilities:**
+- **Self-Service Pattern Detection** - Understands DeFi patterns where users manage their own funds (withdraw, claim, stake) to avoid false positives
+- **Visibility-Aware Analysis** - Adjusts confidence based on function visibility (private/internal = lower risk)
+- **Confidence Scoring** - Each finding includes High/Medium/Low confidence with intelligent adjustments
+- **Recursive Scanning** - Analyze entire contract directories at once
+- **Multiple Output Formats** - Terminal (colored) or JSON for tooling integration
+- **CI/CD Ready** - Exit codes (0/1/2) for pipeline integration
+- **Fast Analysis** - Built with Rust for maximum performance
 
 ---
 
@@ -46,7 +63,7 @@ A Solidity security scanner that detects common vulnerabilities through static a
 
 ```bash
 # Clone the repository
-git clone <your-repo>
+git clone https://github.com/yourusername/stealth.git
 cd stealth
 
 # Build from source
@@ -55,10 +72,10 @@ cargo build --release
 
 # The binary will be at core/target/release/core
 
-# Optional: Install globally as 'stealth'
+# Optional: Install globally
 cargo install --path .
 
-# After installation, use 'stealth' command directly
+# After installation, you can use 'stealth' command directly
 stealth scan ./contracts --recursive
 ```
 
@@ -164,6 +181,25 @@ Options:
   -h, --help                Print help
   -V, --version             Print version
 ```
+
+---
+
+## Limitations
+
+Stealth focuses on detecting common vulnerability patterns through static analysis. It does not:
+
+- Perform symbolic execution or formal verification
+- Analyze complex business logic vulnerabilities
+- Detect all possible attack vectors (no tool can)
+- Replace professional security audits
+
+For production deployments, I recommend using Stealth alongside professional audits and comprehensive testing.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
 
 ---
 

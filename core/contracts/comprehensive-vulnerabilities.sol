@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.20;
 
-// This contract demonstrates ALL SEVEN vulnerability types - Phase 2.5
+/// Comprehensive Vulnerabilities - All 7 vulnerability types in one contract
+/// Perfect for quick smoke testing - should detect all vulnerability types
 contract ComprehensiveVulnerabilities {
     mapping(address => uint256) public balances;
     address public owner;
@@ -24,36 +25,46 @@ contract ComprehensiveVulnerabilities {
 
     // VULNERABILITY 2: Unchecked external call
     function forwardFunds(address payable recipient) public {
-        recipient.call{value: address(this).balance}(""); // Not checking return value
+        // Intentionally not checking return value - vulnerability for testing
+        (bool success, ) = recipient.call{value: address(this).balance}("");
+        success; // Suppress unused variable warning
     }
 
     // VULNERABILITY 3: tx.origin authentication
     function emergencyWithdraw() public {
         require(tx.origin == owner); // Using tx.origin instead of msg.sender
-        payable(owner).transfer(address(this).balance);
+        (bool success, ) = payable(owner).call{value: address(this).balance}("");
+        require(success);
     }
 
     // VULNERABILITY 4: Missing access control
-    function destroy() public {
-        selfdestruct(payable(msg.sender)); // No access control!
+    function withdrawAll(address payable to) public {
+        // No access control - anyone can drain the contract!
+        (bool success, ) = to.call{value: address(this).balance}("");
+        require(success);
     }
 
     // VULNERABILITY 5: Dangerous delegatecall
     function execute(address target, bytes memory data) public {
-        target.delegatecall(data); // User-controlled delegatecall
+        // Intentionally not checking return value - vulnerability for testing
+        (bool success, ) = target.delegatecall(data);
+        success; // Suppress unused variable warning
     }
 
     // VULNERABILITY 6: Timestamp dependence
     function claimPrize() public {
         require(block.timestamp % 15 == 0, "Not the right time"); // Exact timestamp check
-        payable(msg.sender).transfer(prize);
+        (bool success, ) = payable(msg.sender).call{value: prize}("");
+        require(success);
     }
 
     // VULNERABILITY 7: Unsafe randomness
     function lottery() public {
-        uint256 random = uint256(blockhash(block.number - 1)) % 100; // Predictable randomness
+        // Using block.prevrandao (formerly difficulty) - still predictable
+        uint256 random = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % 100;
         if (random < 50) {
-            payable(msg.sender).transfer(0.1 ether);
+            (bool success, ) = payable(msg.sender).call{value: 0.1 ether}("");
+            require(success);
         }
     }
 
@@ -63,3 +74,4 @@ contract ComprehensiveVulnerabilities {
 
     receive() external payable {}
 }
+

@@ -7,10 +7,12 @@ use std::process;
 use tree_sitter;
 use walkdir::WalkDir;
 
+mod heuristics;
+
 #[derive(Parser)]
 #[command(name = "stealth")]
-#[command(version = "0.1.0")]
-#[command(about = "Smart contract security scanner for Solidity", long_about = None)]
+#[command(version = "0.4.0")]
+#[command(about = "Smart contract security scanner for Solidity - Enhanced with Self-Service & Visibility Heuristics", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -33,7 +35,7 @@ enum Commands {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 enum Severity {
     Critical,
     High,
@@ -52,7 +54,7 @@ impl Severity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[allow(dead_code)]
 enum Confidence {
     High,
@@ -410,7 +412,7 @@ fn print_json_output(files_scanned: usize, findings: &[Finding], statistics: &St
     }
 }
 
-// Detector 1: Reentrancy
+// Detector 1: Reentrancy (with visibility-aware confidence adjustment)
 fn detect_reentrancy(tree: &tree_sitter::Tree, source_code: &str, findings: &mut Vec<Finding>) {
     let root_node = tree.root_node();
     find_functions(&root_node, source_code, findings);
@@ -422,7 +424,7 @@ fn find_functions(node: &tree_sitter::Node, source_code: &str, findings: &mut Ve
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_functions(&child, source_code, findings);
         }
     }
@@ -433,6 +435,19 @@ fn check_function_for_reentrancy(
     source_code: &str,
     findings: &mut Vec<Finding>,
 ) {
+    // Skip if function already has reentrancy guard
+    if heuristics::has_reentrancy_guard(function_node, source_code) {
+        return;
+    }
+
+    // Get function visibility for risk assessment
+    let visibility = heuristics::get_function_visibility(function_node, source_code);
+    
+    // Skip private functions - they have no external reentrancy risk
+    if visibility.risk_level() == 0 {
+        return;
+    }
+    
     let body = match find_child_by_kind(function_node, "function_body") {
         Some(b) => b,
         None => return,
@@ -447,22 +462,45 @@ fn check_function_for_reentrancy(
                     let line = stmt.start_position().row + 1;
                     let state_line = later_stmt.start_position().row + 1;
 
-                    // Determine confidence based on pattern clarity
-                    let confidence = if is_balance_mapping_change(later_stmt, source_code) {
+                    // Determine base confidence from pattern clarity
+                    let base_confidence = if is_balance_mapping_change(later_stmt, source_code) {
                         Confidence::High // Classic reentrancy pattern
                     } else {
-                        Confidence::Medium // General state change
+                        Confidence::Medium // General state change after external call
+                    };
+
+                    // Adjust confidence based on function visibility
+                    let (adjustment, visibility_note) = heuristics::visibility_confidence_adjustment(visibility);
+                    let adjusted_confidence = adjust_confidence(base_confidence, adjustment);
+
+                    // Determine severity based on risk level and pattern
+                    let risk = visibility.risk_level();
+                    let severity = if risk >= 3 && is_balance_mapping_change(later_stmt, source_code) {
+                        Severity::Critical // High risk function + classic pattern
+                    } else if risk >= 3 {
+                        Severity::High // High risk function
+                    } else {
+                        Severity::Medium // Lower risk (internal functions)
+                    };
+
+                    let message = if !visibility.is_externally_callable() {
+                        format!(
+                            "External call at line {}, state change at line {} ({})",
+                            line, state_line, visibility_note
+                        )
+                    } else {
+                        format!(
+                            "External call at line {}, state change at line {}",
+                            line, state_line
+                        )
                     };
 
                     findings.push(Finding {
-                        severity: Severity::High,
-                        confidence,
+                        severity,
+                        confidence: adjusted_confidence,
                         line,
                         vulnerability_type: "Reentrancy".to_string(),
-                        message: format!(
-                            "External call at line {}, state change at line {}",
-                            line, state_line
-                        ),
+                        message,
                         suggestion:
                             "Move state changes before external call, or add nonReentrant modifier"
                                 .to_string(),
@@ -486,13 +524,13 @@ fn detect_unchecked_calls(
 }
 
 fn find_unchecked_calls(node: &tree_sitter::Node, source_code: &str, findings: &mut Vec<Finding>) {
-    // Look for .call() without checking return value
+    // Look for .call() without return value checking
     if node.kind() == "expression_statement" {
         let text = &source_code[node.byte_range()];
 
-        // Check if this is a .call() without capturing return value
+        // Check if this is a .call() that doesn't capture the return value
         if text.contains(".call(") || text.contains(".call{") {
-            // If the statement doesn't start with a variable assignment or require/if check
+            // Verify it's not already checked with require/if or captured in a variable
             let trimmed = text.trim();
             if !trimmed.starts_with("(")
                 && !trimmed.starts_with("require")
@@ -501,7 +539,7 @@ fn find_unchecked_calls(node: &tree_sitter::Node, source_code: &str, findings: &
                 let line = node.start_position().row + 1;
                 findings.push(Finding {
                     severity: Severity::Medium,
-                    confidence: Confidence::High,  // Very clear pattern
+                    confidence: Confidence::High,  // Clear pattern
                     line,
                     vulnerability_type: "Unchecked Call".to_string(),
                     message: "External call return value is not checked".to_string(),
@@ -513,7 +551,7 @@ fn find_unchecked_calls(node: &tree_sitter::Node, source_code: &str, findings: &
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_unchecked_calls(&child, source_code, findings);
         }
     }
@@ -528,19 +566,19 @@ fn detect_tx_origin(tree: &tree_sitter::Tree, source_code: &str, findings: &mut 
 fn find_tx_origin_usage(node: &tree_sitter::Node, source_code: &str, findings: &mut Vec<Finding>) {
     let text = &source_code[node.byte_range()];
 
-    // Check for tx.origin in require statements or conditionals (potential auth check)
+    // Look for tx.origin in require statements or conditionals (authentication pattern)
     if (node.kind() == "call_expression"
         || node.kind() == "require_statement"
         || node.kind() == "if_statement"
         || node.kind() == "binary_expression")
         && text.contains("tx.origin")
     {
-        // Check if it's being used for comparison (authentication pattern)
+        // Check if it's being used for comparison (authentication)
         if text.contains("==") || text.contains("!=") {
             let line = node.start_position().row + 1;
             findings.push(Finding {
                 severity: Severity::High,
-                confidence: Confidence::High, // Definitive anti-pattern
+                confidence: Confidence::High, // Well-known anti-pattern
                 line,
                 vulnerability_type: "tx.origin Authentication".to_string(),
                 message: "Using tx.origin for authorization is unsafe".to_string(),
@@ -552,13 +590,13 @@ fn find_tx_origin_usage(node: &tree_sitter::Node, source_code: &str, findings: &
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_tx_origin_usage(&child, source_code, findings);
         }
     }
 }
 
-// Detector 4: Missing Access Control
+// Detector 4: Missing Access Control (with self-service pattern detection)
 fn detect_access_control(tree: &tree_sitter::Tree, source_code: &str, findings: &mut Vec<Finding>) {
     let root_node = tree.root_node();
     find_missing_access_control(&root_node, source_code, findings);
@@ -571,38 +609,94 @@ fn find_missing_access_control(
 ) {
     if node.kind() == "function_definition" {
         let func_text = &source_code[node.byte_range()];
+        let visibility = heuristics::get_function_visibility(node, source_code);
 
-        // Look for sensitive functions (withdraw, transfer, destroy, kill, etc.) without modifiers
-        let sensitive_names = [
-            "withdraw",
-            "transfer",
-            "destroy",
-            "selfdestruct",
-            "kill",
-            "suicide",
+        // Only check public/external functions
+        if !visibility.is_externally_callable() {
+            return;
+        }
+
+        // Skip view/pure functions - they don't need access control
+        let is_view_or_pure = func_text.contains(" view ") 
+            || func_text.contains(" pure ")
+            || func_text.contains("\tview ")
+            || func_text.contains("\tpure ");
+        
+        if is_view_or_pure {
+            return;
+        }
+
+        // Sensitive operations that typically require access control
+        let sensitive_keywords = [
+            "selfdestruct", "suicide",        // Contract destruction
+            "delegatecall",                   // Arbitrary code execution
+            "setowner", "changeowner", "transferownership", // Ownership transfers
+            "setadmin", "addadmin",           // Admin management
+            "pause", "unpause",               // Circuit breakers
+            "setfee", "setrate",              // Economic parameters
+            "upgrade", "setimplementation",   // Upgrades
+            "initialize", "init",             // Initializers
         ];
-        let has_sensitive_name = sensitive_names
+        
+        let func_text_lower = func_text.to_lowercase();
+        let is_sensitive = sensitive_keywords
             .iter()
-            .any(|&name| func_text.to_lowercase().contains(name));
+            .any(|&kw| func_text_lower.contains(kw));
 
-        if has_sensitive_name {
-            // Check if function has access control
-            let has_require_msg_sender =
-                func_text.contains("require") && func_text.contains("msg.sender");
-            let has_modifier = func_text.contains("onlyOwner") || func_text.contains("onlyAdmin");
-            let is_internal = func_text.contains("internal") || func_text.contains("private");
+        if is_sensitive && !has_access_control(func_text) {
+            // Skip self-service functions (users managing their own funds)
+            if heuristics::should_skip_access_control_warning(node, source_code) {
+                return;
+            }
 
-            if !has_require_msg_sender && !has_modifier && !is_internal {
+            let line = node.start_position().row + 1;
+            let func_name = heuristics::get_function_name(node, source_code).unwrap_or("unknown");
+            
+            findings.push(Finding {
+                severity: Severity::High,
+                confidence: Confidence::High,
+                line,
+                vulnerability_type: "Missing Access Control".to_string(),
+                message: format!(
+                    "Function '{}' performs sensitive operations without access control",
+                    func_name
+                ),
+                suggestion: "Add onlyOwner, onlyAdmin, or similar access control modifier".to_string(),
+                file_path: None,
+            });
+        }
+
+        // Check for withdraw functions without proper access control
+        let withdraw_keywords = ["withdraw", "transfer", "send"];
+        let has_withdraw_action = withdraw_keywords
+            .iter()
+            .any(|&kw| func_text_lower.contains(kw));
+
+        if has_withdraw_action {
+            // Skip self-service withdrawals (users withdrawing their own funds)
+            if heuristics::should_skip_access_control_warning(node, source_code) {
+                return;
+            }
+
+            // Check if function allows arbitrary recipient addresses
+            let has_arbitrary_recipient = func_text.contains("address to")
+                || func_text.contains("address _to")
+                || func_text.contains("address recipient");
+
+            if has_arbitrary_recipient && !has_access_control(func_text) {
                 let line = node.start_position().row + 1;
+                let func_name = heuristics::get_function_name(node, source_code).unwrap_or("unknown");
+                
                 findings.push(Finding {
                     severity: Severity::High,
-                    confidence: Confidence::Medium, // Could be a false positive
+                    confidence: Confidence::High,
                     line,
-                    vulnerability_type: "Missing Access Control".to_string(),
-                    message: "Sensitive function may lack access control".to_string(),
-                    suggestion:
-                        "Add require(msg.sender == owner) or use an access control modifier"
-                            .to_string(),
+                    vulnerability_type: "Unrestricted Fund Transfer".to_string(),
+                    message: format!(
+                        "Function '{}' allows arbitrary fund transfers without access control",
+                        func_name
+                    ),
+                    suggestion: "Add access control or restrict to msg.sender withdrawals only".to_string(),
                     file_path: None,
                 });
             }
@@ -610,10 +704,26 @@ fn find_missing_access_control(
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_missing_access_control(&child, source_code, findings);
         }
     }
+}
+
+fn has_access_control(func_text: &str) -> bool {
+    // Check for access control modifiers
+    let has_modifier = func_text.contains("onlyOwner")
+        || func_text.contains("onlyAdmin")
+        || func_text.contains("onlyRole")
+        || func_text.contains("onlyAuthorized");
+
+    // Check for require statements with msg.sender checks
+    let has_require_sender = func_text.contains("require")
+        && (func_text.contains("msg.sender == owner")
+            || func_text.contains("msg.sender == admin")
+            || func_text.contains("_owner"));
+
+    has_modifier || has_require_sender
 }
 
 // Detector 5: Dangerous delegatecall
@@ -631,29 +741,31 @@ fn find_dangerous_delegatecall(
     source_code: &str,
     findings: &mut Vec<Finding>,
 ) {
-    let text = &source_code[node.byte_range()];
+    if node.kind() == "function_definition" {
+        let func_text = &source_code[node.byte_range()];
 
-    // Look for delegatecall usage
-    if text.contains("delegatecall") {
-        // Check if the target address is user-controlled (parameter or storage variable)
-        let line = node.start_position().row + 1;
+        if func_text.contains(".delegatecall(") {
+            // Check if target address comes from function parameter (user-controlled)
+            let has_address_param = func_text.contains("address ")
+                && (func_text.contains("(address ") || func_text.contains(", address "));
 
-        // Look for patterns like: address.delegatecall or addr.delegatecall where addr might be controllable
-        if node.kind() == "call_expression" || node.kind() == "expression_statement" {
-            findings.push(Finding {
-                severity: Severity::Critical,
-                confidence: Confidence::Medium,  // Need to verify if user-controlled
-                line,
-                vulnerability_type: "Dangerous Delegatecall".to_string(),
-                message: "delegatecall to potentially user-controlled address".to_string(),
-                suggestion: "Ensure delegatecall target is hardcoded or strictly validated. Consider using library pattern.".to_string(),
-                file_path: None,
-            });
+            if has_address_param && !has_access_control(func_text) {
+                let line = node.start_position().row + 1;
+                findings.push(Finding {
+                    severity: Severity::Critical,
+                    confidence: Confidence::High,
+                    line,
+                    vulnerability_type: "Dangerous Delegatecall".to_string(),
+                    message: "Delegatecall to user-supplied address without access control".to_string(),
+                    suggestion: "Add strict access control or use a whitelist for delegatecall targets".to_string(),
+                    file_path: None,
+                });
+            }
         }
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_dangerous_delegatecall(&child, source_code, findings);
         }
     }
@@ -674,28 +786,55 @@ fn find_timestamp_dependence(
     source_code: &str,
     findings: &mut Vec<Finding>,
 ) {
-    let text = &source_code[node.byte_range()];
+    if node.kind() == "function_definition" {
+        let func_text = &source_code[node.byte_range()];
 
-    // Look for timestamp or block.timestamp in critical operations
-    if (text.contains("block.timestamp") || text.contains("now"))
-        && (node.kind() == "require_statement"
-            || node.kind() == "if_statement"
-            || node.kind() == "binary_expression")
-    {
-        let line = node.start_position().row + 1;
-        findings.push(Finding {
-            severity: Severity::Low,
-            confidence: Confidence::Medium,
-            line,
-            vulnerability_type: "Timestamp Dependence".to_string(),
-            message: "Using block.timestamp for critical logic can be manipulated by miners".to_string(),
-            suggestion: "Avoid using block.timestamp for critical decisions. If needed, allow ~15 minute tolerance.".to_string(),
-            file_path: None,
-        });
+        // Check for block.timestamp or now usage
+        if func_text.contains("block.timestamp") || func_text.contains("now") {
+            // Look for dangerous patterns
+            let has_equality = func_text.contains("== block.timestamp")
+                || func_text.contains("block.timestamp ==");
+            let has_modulo = func_text.contains("% block.timestamp")
+                || func_text.contains("block.timestamp %");
+
+            // View/pure functions have lower severity
+            let is_view = func_text.contains(" view ") || func_text.contains(" pure ");
+
+            if has_equality || has_modulo {
+                let severity = if has_modulo {
+                    Severity::High
+                } else {
+                    Severity::Medium
+                };
+                
+                let confidence = if is_view {
+                    Confidence::Low
+                } else {
+                    Confidence::Medium
+                };
+
+                let message = if has_modulo {
+                    "Using block.timestamp with modulo can be manipulated by miners".to_string()
+                } else {
+                    "Exact comparison with block.timestamp can be manipulated".to_string()
+                };
+
+                let line = node.start_position().row + 1;
+                findings.push(Finding {
+                    severity,
+                    confidence,
+                    line,
+                    vulnerability_type: "Timestamp Dependence".to_string(),
+                    message,
+                    suggestion: "Use block.timestamp only for >15 minute precision; avoid equality checks".to_string(),
+                    file_path: None,
+                });
+            }
+        }
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_timestamp_dependence(&child, source_code, findings);
         }
     }
@@ -708,41 +847,63 @@ fn detect_unsafe_random(tree: &tree_sitter::Tree, source_code: &str, findings: &
 }
 
 fn find_unsafe_random(node: &tree_sitter::Node, source_code: &str, findings: &mut Vec<Finding>) {
-    let text = &source_code[node.byte_range()];
+    // Only check at function level to avoid duplicates
+    if node.kind() == "function_definition" {
+        let func_text = &source_code[node.byte_range()];
 
-    // Look for blockhash or block.number used in randomness
-    let has_blockhash = text.contains("blockhash")
-        || text.contains("block.number")
-        || text.contains("block.difficulty");
-    let has_modulo = text.contains("%");
+        // Check for common insecure randomness patterns
+        let bad_patterns = [
+            "keccak256(abi.encodePacked(block.timestamp",
+            "keccak256(abi.encodePacked(block.difficulty",
+            "keccak256(abi.encodePacked(block.prevrandao",
+            "keccak256(abi.encodePacked(block.number",
+            "blockhash(",
+        ];
 
-    if has_blockhash && has_modulo {
-        let line = node.start_position().row + 1;
-        findings.push(Finding {
-            severity: Severity::Medium,
-            confidence: Confidence::High,
-            line,
-            vulnerability_type: "Unsafe Randomness".to_string(),
-            message: "Using block properties for randomness is predictable".to_string(),
-            suggestion: "Use Chainlink VRF or commit-reveal scheme for true randomness".to_string(),
-            file_path: None,
-        });
+        for pattern in &bad_patterns {
+            if func_text.contains(pattern) {
+                let line = node.start_position().row + 1;
+                findings.push(Finding {
+                    severity: Severity::High,
+                    confidence: Confidence::Medium,
+                    line,
+                    vulnerability_type: "Unsafe Randomness".to_string(),
+                    message: "Using block variables for randomness can be predicted/manipulated".to_string(),
+                    suggestion: "Use Chainlink VRF or commit-reveal scheme for secure randomness".to_string(),
+                    file_path: None,
+                });
+                break; // Only report once per function
+            }
+        }
     }
 
+    // Recurse to find functions
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             find_unsafe_random(&child, source_code, findings);
         }
     }
 }
 
 // Helper functions
+fn adjust_confidence(base: Confidence, adjustment: i8) -> Confidence {
+    match (base, adjustment) {
+        // Downgrade from High
+        (Confidence::High, -2) => Confidence::Low,
+        (Confidence::High, -1) => Confidence::Medium,
+        // Downgrade from Medium
+        (Confidence::Medium, -1 | -2) => Confidence::Low,
+        // Keep base confidence otherwise
+        _ => base,
+    }
+}
+
 fn find_child_by_kind<'a>(
     node: &'a tree_sitter::Node,
     kind: &str,
 ) -> Option<tree_sitter::Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             if child.kind() == kind {
                 return Some(child);
             }
@@ -769,7 +930,7 @@ fn collect_recursive<'a>(node: tree_sitter::Node<'a>, statements: &mut Vec<tree_
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
+        if let Some(child) = node.child(i as u32) {
             collect_recursive(child, statements);
         }
     }
@@ -799,7 +960,7 @@ fn is_state_change(node: &tree_sitter::Node, source_code: &str) -> bool {
 
 fn is_balance_mapping_change(node: &tree_sitter::Node, source_code: &str) -> bool {
     let text = &source_code[node.byte_range()];
-    // Check specifically for balance mapping changes - classic reentrancy pattern
+    // Check for balance mapping changes - classic reentrancy pattern indicator
     (text.contains("balances[") || text.contains("balance["))
         && (text.contains("=") && !text.contains("=="))
 }

@@ -12,6 +12,9 @@ target/
 .vscode/
 *.code-workspace
 
+# IDE - Cursor
+.cursor/
+
 # IDE - JetBrains
 .idea/
 *.iml
