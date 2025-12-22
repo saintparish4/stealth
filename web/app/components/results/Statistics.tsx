@@ -8,12 +8,18 @@ interface StatisticsProps {
 
 export default function Statistics({ result }: StatisticsProps) {
   const { statistics, scan_time_ms, filename } = result
-  const total = statistics.critical + statistics.high + statistics.medium + statistics.low
+  
+  // Defensive defaults for statistics
+  const stats_critical = statistics?.critical ?? 0
+  const stats_high = statistics?.high ?? 0
+  const stats_medium = statistics?.medium ?? 0
+  const stats_low = statistics?.low ?? 0
+  const total = stats_critical + stats_high + stats_medium + stats_low
 
-  const stats = [
+  const statsList = [
     {
       label: 'Critical',
-      value: statistics.critical,
+      value: stats_critical,
       icon: AlertTriangle,
       color: 'text-red-500',
       bg: 'bg-red-500/10',
@@ -21,7 +27,7 @@ export default function Statistics({ result }: StatisticsProps) {
     },
     {
       label: 'High',
-      value: statistics.high,
+      value: stats_high,
       icon: AlertTriangle,
       color: 'text-red-400',
       bg: 'bg-red-500/10',
@@ -29,7 +35,7 @@ export default function Statistics({ result }: StatisticsProps) {
     },
     {
       label: 'Medium',
-      value: statistics.medium,
+      value: stats_medium,
       icon: AlertCircle,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
@@ -37,7 +43,7 @@ export default function Statistics({ result }: StatisticsProps) {
     },
     {
       label: 'Low',
-      value: statistics.low,
+      value: stats_low,
       icon: Info,
       color: 'text-blue-400',
       bg: 'bg-blue-500/10',
@@ -70,7 +76,7 @@ export default function Statistics({ result }: StatisticsProps) {
                 <p className="text-muted-foreground/70 text-sm font-light">
                   {total === 0 
                     ? 'Your contract passed all security checks'
-                    : `Found ${statistics.critical + statistics.high} critical/high severity issues`
+                    : `Found ${stats_critical + stats_high} critical/high severity issues`
                   }
                 </p>
               </div>
@@ -91,7 +97,7 @@ export default function Statistics({ result }: StatisticsProps) {
 
       {/* Severity Breakdown */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {stats.map((stat) => {
+        {statsList.map((stat) => {
           const Icon = stat.icon
           const borderColor = stat.ring.replace('ring-', 'border-').replace('/20', '/15')
           return (
@@ -122,15 +128,15 @@ export default function Statistics({ result }: StatisticsProps) {
             <div className="flex gap-6">
               <div className="flex items-center gap-2.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
-                <span className="text-sm font-light">High: {statistics.confidence_high}</span>
+                <span className="text-sm font-light">High: {statistics?.confidence_high ?? 0}</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500/60" />
-                <span className="text-sm font-light">Medium: {statistics.confidence_medium}</span>
+                <span className="text-sm font-light">Medium: {statistics?.confidence_medium ?? 0}</span>
               </div>
               <div className="flex items-center gap-2.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500/60" />
-                <span className="text-sm font-light">Low: {statistics.confidence_low}</span>
+                <span className="text-sm font-light">Low: {statistics?.confidence_low ?? 0}</span>
               </div>
             </div>
           </CardContent>

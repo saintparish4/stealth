@@ -40,9 +40,10 @@ export interface ScanResult {
   scan_time_ms: number;
 }
 
-// Path to the Stealth binary - adjust as needed
-const STEALTH_BINARY = process.env.STEALTH_PATH || "./stealth";
-const TEMP_DIR = process.env.TEMP_DIR || "./tmp/stealth-scans";
+// Path to the Vanguard binary - adjust as needed
+// The binary is named "core" (from Cargo.toml) not "vanguard"
+const VANGUARD_BINARY = process.env.VANGUARD_PATH || "../core/target/release/core";
+const TEMP_DIR = process.env.TEMP_DIR || "./tmp/vanguard-scans";
 
 // In-memory store for scan results (replace with DB in production)
 const scanResults = new Map<string, ScanResult>();
@@ -62,15 +63,34 @@ export async function scanContract(
   await writeFile(tempFile, sourceCode, "utf-8");
 
   try {
-    // Run Stealth scanner
-    const { stdout, stderr } = await execAsync(
-      `${STEALTH_BINARY} scan ${tempFile} --format json`,
-      { timeout: 30000 } // 30 second timeout
-    );
+    // Run Vanguard scanner
+    // Note: The binary may exit with non-zero code when vulnerabilities are found
+    // (e.g., exit code 2 = vulnerabilities detected), so we need to handle that
+    let stdout = "";
+    let stderr = "";
+    
+    try {
+      const result = await execAsync(
+        `${VANGUARD_BINARY} scan ${tempFile} --format json`,
+        { timeout: 30000 } // 30 second timeout
+      );
+      stdout = result.stdout;
+      stderr = result.stderr;
+    } catch (execError: unknown) {
+      // execAsync throws on non-zero exit codes, but we may still have valid output
+      const err = execError as { stdout?: string; stderr?: string; code?: number };
+      if (err.stdout) {
+        stdout = err.stdout;
+        stderr = err.stderr || "";
+      } else {
+        // No output means actual failure
+        throw execError;
+      }
+    }
 
     // Log any warnings or errors from stderr
     if (stderr) {
-      console.warn(`Stealth scanner stderr: ${stderr}`);
+      console.warn(`Vanguard scanner stderr: ${stderr}`);
     }
 
     const endTime = Date.now();

@@ -12,6 +12,15 @@ interface FindingCardProps {
   onLineClick?: (line: number) => void
 }
 
+// Default config to use as fallback
+const defaultConfig = {
+  icon: AlertCircle,
+  variant: 'medium' as const,
+  color: 'text-amber-400',
+  bg: 'bg-amber-500/10',
+  border: 'border-amber-500/20',
+}
+
 const severityConfig: Record<string, {
   icon: typeof AlertTriangle
   variant: 'critical' | 'high' | 'medium' | 'low'
@@ -49,10 +58,23 @@ const severityConfig: Record<string, {
   },
 }
 
+// Helper function to safely get config
+function getConfig(severity: string | undefined | null) {
+  if (!severity) return defaultConfig
+  const key = severity.toUpperCase()
+  return severityConfig[key] || defaultConfig
+}
+
 export default function FindingCard({ finding, index, onLineClick }: FindingCardProps) {
-  const [expanded, setExpanded] = useState(index < 3) // Auto-expand first 3
-  const config = severityConfig[finding.severity]
+  // Get config first using safe helper function
+  const config = getConfig(finding?.severity)
   const Icon = config.icon
+  const [expanded, setExpanded] = useState(index < 3) // Auto-expand first 3
+  
+  // Defensive check for missing finding data
+  if (!finding) {
+    return null
+  }
 
   return (
     <Card className={`${config.border.replace('/20', '/15')} transition-all duration-300 hover:border-opacity-60`}>
@@ -68,23 +90,25 @@ export default function FindingCard({ finding, index, onLineClick }: FindingCard
             <div className="space-y-2">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <Badge variant={config.variant}>
-                  {finding.severity}
+                  {finding.severity || 'Unknown'}
                 </Badge>
                 <Badge variant="outline">
-                  Confidence: {finding.confidence}
+                  Confidence: {finding.confidence || 'Unknown'}
                 </Badge>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onLineClick?.(finding.line)
-                  }}
-                  className="text-xs font-mono text-primary/80 hover:text-primary transition-colors font-light"
-                >
-                  Line {finding.line}
-                </button>
+                {finding.line && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onLineClick?.(finding.line)
+                    }}
+                    className="text-xs font-mono text-primary/80 hover:text-primary transition-colors font-light"
+                  >
+                    Line {finding.line}
+                  </button>
+                )}
               </div>
               <h3 className="font-light text-foreground tracking-tight">
-                {finding.vulnerability_type}
+                {finding.vulnerability_type || 'Unknown Vulnerability'}
               </h3>
             </div>
           </div>
@@ -102,23 +126,25 @@ export default function FindingCard({ finding, index, onLineClick }: FindingCard
         <CardContent className="space-y-5 pt-0">
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground/80 font-light leading-relaxed">
-              {finding.message}
+              {finding.message || 'No description available'}
             </p>
           </div>
           
-          <div className={`p-5 rounded-lg ${config.bg} ${config.border.replace('/20', '/15')} border`}>
-            <div className="flex items-start gap-3">
-              <Lightbulb className={`w-4 h-4 mt-0.5 ${config.color}`} />
-              <div>
-                <span className="text-xs font-light uppercase tracking-wider text-muted-foreground/70">
-                  Recommendation
-                </span>
-                <p className="text-sm text-foreground/90 mt-2 font-light leading-relaxed">
-                  {finding.suggestion}
-                </p>
+          {finding.suggestion && (
+            <div className={`p-5 rounded-lg ${config.bg} ${config.border.replace('/20', '/15')} border`}>
+              <div className="flex items-start gap-3">
+                <Lightbulb className={`w-4 h-4 mt-0.5 ${config.color}`} />
+                <div>
+                  <span className="text-xs font-light uppercase tracking-wider text-muted-foreground/70">
+                    Recommendation
+                  </span>
+                  <p className="text-sm text-foreground/90 mt-2 font-light leading-relaxed">
+                    {finding.suggestion}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </CardContent>
       )}
     </Card>
