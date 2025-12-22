@@ -68,6 +68,11 @@ export async function scanContract(
       { timeout: 30000 } // 30 second timeout
     );
 
+    // Log any warnings or errors from stderr
+    if (stderr) {
+      console.warn(`Stealth scanner stderr: ${stderr}`);
+    }
+
     const endTime = Date.now();
 
     // Parse JSON output

@@ -3,10 +3,11 @@ import { getScanResult } from '../../../lib/scanner'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const result = await getScanResult(params.id)
+    const { id } = await params
+    const result = await getScanResult(id)
     
     if (!result) {
       return NextResponse.json(

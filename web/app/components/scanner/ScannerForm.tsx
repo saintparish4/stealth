@@ -138,6 +138,11 @@ export default function ScannerForm() {
       }
 
       const result = await response.json()
+      
+      // Store result in sessionStorage for the results page to read
+      // This works around Next.js module isolation issues with in-memory storage
+      sessionStorage.setItem(`scan-result-${result.id}`, JSON.stringify(result))
+      
       router.push(`/results/${result.id}`)
     } catch {
       setError('Failed to scan contract. Please try again.')
