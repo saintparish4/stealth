@@ -13,8 +13,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Use mock scanner for demo, real scanner for production
-    const useMock = process.env.USE_MOCK_SCANNER === 'true' || !process.env.VANGUARD_PATH
+    // Use mock scanner only if explicitly set
+    const useMock = process.env.USE_MOCK_SCANNER === 'true'
     
     const result = useMock 
       ? await mockScanContract(code, filename || 'contract.sol')

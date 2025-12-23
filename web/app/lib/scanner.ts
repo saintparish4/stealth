@@ -40,10 +40,15 @@ export interface ScanResult {
   scan_time_ms: number;
 }
 
-// Path to the Vanguard binary - adjust as needed
-// The binary is named "core" (from Cargo.toml) not "vanguard"
-const VANGUARD_BINARY = process.env.VANGUARD_PATH || "../core/target/release/core";
-const TEMP_DIR = process.env.TEMP_DIR || "./tmp/vanguard-scans";
+// Path to the Vanguard binary
+// In production (Vercel): ./bin/vanguard (committed by GitHub Actions)
+// In development: ../core/target/release/core (local build)
+const VANGUARD_BINARY = process.env.VANGUARD_PATH || 
+  (process.env.NODE_ENV === 'production' 
+    ? path.join(process.cwd(), 'bin', 'vanguard')
+    : path.join(process.cwd(), '..', 'core', 'target', 'release', 'core'));
+
+const TEMP_DIR = process.env.TEMP_DIR || "/tmp/vanguard-scans";
 
 // In-memory store for scan results (replace with DB in production)
 const scanResults = new Map<string, ScanResult>();
