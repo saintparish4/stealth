@@ -71,18 +71,22 @@ jobs:
           ls -lh web/bin/vanguard
       
       # Commit binary back to repository (only on push to main, not PRs)
-      - name: Commit binary
+      - name: Commit and push binary
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add web/bin/vanguard
-          git diff --staged --quiet || git commit -m "chore: update Rust scanner binary [skip ci]"
-      
-      # Push changes (triggers Vercel deployment automatically)
-      - name: Push binary
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
+          
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to binary, skipping commit"
+          else
+            git commit -m "chore: update Rust scanner binary [skip ci]"
+            
+            # Pull with rebase to handle any new commits
+            git pull --rebase origin ${{ github.ref_name }}
+            
+            # Push the changes
+            git push origin HEAD:${{ github.ref_name }}
+          fi
