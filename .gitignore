@@ -59,5 +59,6 @@ $RECYCLE.BIN/
 .vercel/
 web/.vercel/
 
-# Scanner binary (built by GitHub Actions)
-web/bin/
+# Scanner binary (built by GitHub Actions and committed to repo)
+# Uncomment the line below to exclude the binary from git
+# web/bin/

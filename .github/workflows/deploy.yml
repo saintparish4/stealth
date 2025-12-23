@@ -1,22 +1,29 @@
-name: Build and Deploy to Vercel
+name: Build Rust Scanner Binary
 
 on:
   push:
     branches: [main, master]
+    paths:
+      - 'core/**'
+      - '.github/workflows/deploy.yml'
   pull_request:
     branches: [main, master]
+    paths:
+      - 'core/**'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-deploy:
+  build-rust-binary:
     runs-on: ubuntu-latest
     
     steps:
       # Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       # Setup Rust toolchain
       - name: Setup Rust
@@ -57,47 +64,21 @@ jobs:
           cp core/target/release/core web/bin/vanguard
           chmod +x web/bin/vanguard
           echo "✅ Binary copied to web/bin/vanguard"
+          ls -lh web/bin/vanguard
       
-      # Setup Node.js
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-      
-      # Install Node dependencies
-      - name: Install dependencies
-        run: |
-          cd web
-          npm ci
-      
-      # Build Next.js (optional - Vercel will do this, but good for CI validation)
-      - name: Build Next.js
-        run: |
-          cd web
-          npm run build
-        env:
-          NODE_ENV: production
-      
-      # Deploy to Vercel (only on push to main/master, not on PRs)
-      - name: Deploy to Vercel
+      # Commit binary back to repository (only on push to main, not PRs)
+      - name: Commit binary
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: amondnet/vercel-action@v25
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: ./web
-          vercel-args: '--prod --yes'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add web/bin/vanguard
+          git diff --staged --quiet || git commit -m "chore: update Rust scanner binary [skip ci]"
       
-      # Deploy preview for PRs
-      - name: Deploy Preview to Vercel
-        if: github.event_name == 'pull_request'
-        uses: amondnet/vercel-action@v25
+      # Push changes (triggers Vercel deployment automatically)
+      - name: Push binary
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: ad-m/github-push-action@master
         with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: ./web
-          vercel-args: '--no-wait --yes'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
