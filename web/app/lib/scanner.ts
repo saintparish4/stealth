@@ -48,7 +48,10 @@ const VANGUARD_BINARY = process.env.VANGUARD_PATH ||
     ? path.join(process.cwd(), 'bin', 'vanguard')
     : path.join(process.cwd(), '..', 'core', 'target', 'release', 'core'));
 
-const TEMP_DIR = process.env.TEMP_DIR || "/tmp/vanguard-scans";
+// Always use /tmp on Vercel (writable), fall back to absolute path
+const TEMP_DIR = process.env.NODE_ENV === 'production' 
+  ? '/tmp/vanguard-scans'  // Vercel: use /tmp (always writable)
+  : (process.env.TEMP_DIR || path.join(process.cwd(), 'tmp', 'vanguard-scans')); // Local: use project tmp
 
 // In-memory store for scan results (replace with DB in production)
 const scanResults = new Map<string, ScanResult>();
@@ -60,8 +63,14 @@ export async function scanContract(
   const scanId = uuidv4();
   const startTime = Date.now();
 
+  console.log('[Scanner] Binary path:', VANGUARD_BINARY);
+  console.log('[Scanner] Temp dir:', TEMP_DIR);
+  console.log('[Scanner] CWD:', process.cwd());
+  console.log('[Scanner] NODE_ENV:', process.env.NODE_ENV);
+
   // Ensure temp directory exists
   await mkdir(TEMP_DIR, { recursive: true });
+  console.log('[Scanner] Temp directory ready');
 
   // Write source to temp file
   const tempFile = path.join(TEMP_DIR, `${scanId}.sol`);
@@ -74,11 +83,15 @@ export async function scanContract(
     let stdout = "";
     let stderr = "";
     
+    const command = `${VANGUARD_BINARY} scan ${tempFile} --format json`;
+    console.log('[Scanner] Executing command:', command);
+    
     try {
       const result = await execAsync(
-        `${VANGUARD_BINARY} scan ${tempFile} --format json`,
+        command,
         { timeout: 30000 } // 30 second timeout
       );
+      console.log('[Scanner] Command executed successfully');
       stdout = result.stdout;
       stderr = result.stderr;
     } catch (execError: unknown) {
