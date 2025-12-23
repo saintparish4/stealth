@@ -65,6 +65,8 @@ Stealth parses Solidity contracts and identifies security issues before deployme
 | **Rust** | Core scanner engine (performance & safety) |
 | **Cargo** | Build system & package manager |
 | **Solidity** | Target language for vulnerability detection |
+| **Next.js** | Web interface for the scanner |
+| **Vercel** | Hosting platform for web application |
 | **GitHub Actions** | CI/CD workflow support |
 
 ---
@@ -210,6 +212,41 @@ For production deployments, I recommend using Stealth alongside professional aud
 ## Contributing
 
 Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
+
+---
+
+## Web Interface
+
+Stealth includes a modern web interface built with Next.js. The web application provides:
+
+- Interactive code editor with syntax highlighting
+- Real-time vulnerability scanning
+- Beautiful results visualization
+- Easy sharing of scan results
+
+### Deployment
+
+The web application is deployed on Vercel. For deployment instructions, see:
+- `web/DEPLOYMENT.md` - Complete deployment guide
+- `web/QUICK_START.md` - Quick reference for common tasks
+
+### Local Development
+
+```bash
+cd web
+npm install
+npm run dev
+# Open http://localhost:3000
+```
+
+### Production Deployment
+
+```bash
+cd web
+vercel --prod
+```
+
+The web application automatically includes the Rust scanner binary, which is built and bundled during the CI/CD process.
 
 ---
 
