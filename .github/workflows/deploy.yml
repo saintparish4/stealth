@@ -46,17 +46,17 @@ jobs:
       # Verify binary was created
       - name: Verify binary
         run: |
-          ls -lh core/target/release/vanguard
-          file core/target/release/vanguard
-          echo "Binary size: $(du -h core/target/release/vanguard | cut -f1)"
+          ls -lh core/target/release/core
+          file core/target/release/core
+          echo "Binary size: $(du -h core/target/release/core | cut -f1)"
       
       # Copy binary to web project
       - name: Copy binary to web directory
         run: |
           mkdir -p web/bin
-          cp core/target/release/vanguard web/bin/
+          cp core/target/release/core web/bin/vanguard
           chmod +x web/bin/vanguard
-          echo "✅ Binary copied to web/bin/"
+          echo "✅ Binary copied to web/bin/vanguard"
       
       # Setup Node.js
       - name: Setup Node.js
