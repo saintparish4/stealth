@@ -1,6 +1,7 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import { writeFile, unlink, mkdir } from "fs/promises";
+import { existsSync } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
@@ -40,13 +41,30 @@ export interface ScanResult {
   scan_time_ms: number;
 }
 
-// Path to the Vanguard binary
-// In production (Vercel): ./bin/vanguard (committed by GitHub Actions)
-// In development: ../core/target/release/core (local build)
-const VANGUARD_BINARY = process.env.VANGUARD_PATH || 
-  (process.env.NODE_ENV === 'production' 
-    ? path.join(process.cwd(), 'bin', 'vanguard')
-    : path.join(process.cwd(), '..', 'core', 'target', 'release', 'core'));
+// Path to the Vanguard binary - ALWAYS use ./bin/vanguard first, then fall back
+function getBinaryPath(): string {
+  // Try production path first (works on Vercel and when binary is committed)
+  const productionPath = path.join(process.cwd(), 'bin', 'vanguard');
+  if (existsSync(productionPath)) {
+    return productionPath;
+  }
+  
+  // Fall back to development path (local cargo build)
+  const devPath = path.join(process.cwd(), '..', 'core', 'target', 'release', 'core');
+  if (existsSync(devPath)) {
+    return devPath;
+  }
+  
+  // If env var is set, use that
+  if (process.env.VANGUARD_PATH) {
+    return process.env.VANGUARD_PATH;
+  }
+  
+  // Default to production path (will fail with clear error if not found)
+  return productionPath;
+}
+
+const VANGUARD_BINARY = getBinaryPath();
 
 // Always use /tmp on Vercel (writable), fall back to absolute path
 const TEMP_DIR = process.env.NODE_ENV === 'production' 
