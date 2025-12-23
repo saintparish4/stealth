@@ -1,0 +1,103 @@
+name: Build and Deploy to Vercel
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Setup Rust toolchain
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      # Cache Rust dependencies for faster builds
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            core/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      
+      # Build the Rust scanner binary
+      - name: Build Rust scanner
+        run: |
+          cd core
+          cargo build --release --verbose
+          echo "✅ Rust binary built successfully"
+      
+      # Verify binary was created
+      - name: Verify binary
+        run: |
+          ls -lh core/target/release/vanguard
+          file core/target/release/vanguard
+          echo "Binary size: $(du -h core/target/release/vanguard | cut -f1)"
+      
+      # Copy binary to web project
+      - name: Copy binary to web directory
+        run: |
+          mkdir -p web/bin
+          cp core/target/release/vanguard web/bin/
+          chmod +x web/bin/vanguard
+          echo "✅ Binary copied to web/bin/"
+      
+      # Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      
+      # Install Node dependencies
+      - name: Install dependencies
+        run: |
+          cd web
+          npm ci
+      
+      # Build Next.js (optional - Vercel will do this, but good for CI validation)
+      - name: Build Next.js
+        run: |
+          cd web
+          npm run build
+        env:
+          NODE_ENV: production
+      
+      # Deploy to Vercel (only on push to main/master, not on PRs)
+      - name: Deploy to Vercel
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: ./web
+          vercel-args: '--prod'
+      
+      # Deploy preview for PRs
+      - name: Deploy Preview to Vercel
+        if: github.event_name == 'pull_request'
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: ./web
+          vercel-args: '--no-wait'

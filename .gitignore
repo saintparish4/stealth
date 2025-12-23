@@ -55,3 +55,9 @@ $RECYCLE.BIN/
 *.bak
 *.tmp
 
+# Vercel
+.vercel/
+web/.vercel/
+
+# Scanner binary (built by GitHub Actions)
+web/bin/
