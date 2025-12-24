@@ -8,15 +8,14 @@ export default function HomePage() {
       
       <main className="container mx-auto px-6">
         {/* Hero Section - Minimalist */}
-        <div className="text-center pt-24 pb-32 max-w-3xl mx-auto">
-          <h1 className="text-5xl md:text-7xl font-light tracking-tight mb-8 leading-[1.1]">
+        <div className="text-center pt-16 pb-20 max-w-3xl mx-auto">
+          <h1 className="text-4xl md:text-5xl font-light tracking-tight mb-6 leading-[1.15]">
             Smart Contract
             <br />
             <span className="text-primary/90 font-normal">Security Scanner</span>
           </h1>
-          <p className="text-lg md:text-xl text-muted-foreground/80 font-light leading-relaxed max-w-xl mx-auto">
+          <p className="text-base md:text-lg text-muted-foreground/80 font-light leading-relaxed max-w-lg mx-auto">
             Detect vulnerabilities in your Solidity contracts before deployment.
-            <br />
             Powered by static analysis and battle-tested heuristics.
           </p>
         </div>

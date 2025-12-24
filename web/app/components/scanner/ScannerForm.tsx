@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { Upload, Play, FileCode, Loader2, AlertTriangle, Zap } from 'lucide-react'
+import { Upload, Play, Loader2, AlertTriangle, Zap } from 'lucide-react'
 import { Button } from '../../ui/button'
 import { Card, CardContent } from '../../ui/card'
 
@@ -13,7 +13,7 @@ const CodeEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="rounded-lg overflow-hidden border border-border/50 bg-card/50">
-        <div className="flex items-center justify-center h-[450px]">
+        <div className="flex items-center justify-center h-[630px]">
           <div className="text-muted-foreground font-mono text-sm font-light">
             Loading editor...
           </div>
@@ -65,52 +65,6 @@ export default function ScannerForm() {
   const [filename, setFilename] = useState('contract.sol')
   const [isScanning, setIsScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dragActive, setDragActive] = useState(false)
-
-  const handleFileUpload = useCallback((file: File) => {
-    if (!file.name.endsWith('.sol')) {
-      setError('Please upload a Solidity file (.sol)')
-      return
-    }
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const content = e.target?.result as string
-      setCode(content)
-      setFilename(file.name)
-      setError(null)
-    }
-    reader.onerror = () => {
-      setError('Failed to read file')
-    }
-    reader.readAsText(file)
-  }, [])
-
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true)
-    } else if (e.type === 'dragleave') {
-      setDragActive(false)
-    }
-  }, [])
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0])
-    }
-  }, [handleFileUpload])
-
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0])
-    }
-  }, [handleFileUpload])
 
   const handleScan = async () => {
     if (!code.trim()) {
@@ -158,44 +112,25 @@ export default function ScannerForm() {
 
   return (
     <div className="space-y-8">
-      {/* Upload Area */}
-      <Card
-        className={`transition-all duration-300 ${
-          dragActive 
-            ? 'border-primary/30 bg-primary/5' 
-            : 'border-dashed border-2 border-border/50'
-        }`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-      >
-        <CardContent className="p-12">
+      {/* Upload Area - Disabled for security */}
+      <Card className="border-dashed border-2 border-foreground/30 cursor-not-allowed">
+        <CardContent className="p-6">
           <div className="flex flex-col items-center justify-center text-center">
-            <div className={`p-4 rounded-full mb-6 transition-all duration-300 ${
-              dragActive ? 'bg-primary/10' : 'bg-secondary/30'
-            }`}>
-              <Upload className={`w-8 h-8 transition-colors ${dragActive ? 'text-primary/80' : 'text-muted-foreground/60'}`} />
+            <div className="p-3 rounded-full mb-4 bg-secondary/20">
+              <Upload className="w-6 h-6 text-muted-foreground/60" />
             </div>
-            <p className="text-lg font-light mb-2 tracking-tight">
-              {dragActive ? 'Drop your file here' : 'Drag & drop your Solidity file'}
+            <p className="text-base font-light mb-1 tracking-tight text-foreground/80">
+              Drag & drop your Solidity file
             </p>
-            <p className="text-sm text-muted-foreground/70 mb-6 font-light">
+            <p className="text-xs text-muted-foreground/70 mb-4 font-light">
               or click to browse
             </p>
-            <input
-              type="file"
-              accept=".sol"
-              onChange={handleFileInput}
-              className="hidden"
-              id="file-upload"
-            />
-            <label htmlFor="file-upload">
-              <Button variant="ghost" className="cursor-pointer font-light">
-                <FileCode className="w-4 h-4 mr-2" />
-                Browse Files
-              </Button>
-            </label>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <span className="text-xs text-amber-600 font-medium">
+                Disabled — file upload not implemented for security reasons
+              </span>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -222,7 +157,7 @@ export default function ScannerForm() {
         <CodeEditor
           value={code}
           onChange={setCode}
-          height="450px"
+          height="630px"
         />
       </div>
 
