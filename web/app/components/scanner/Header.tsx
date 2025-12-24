@@ -34,7 +34,7 @@ export default function Header() {
               Scanner
             </Link>
             <a
-              href="https://github.com"
+              href="https://github.com/saintparish4/stealth"
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-muted-foreground/70 hover:text-foreground transition-colors duration-300 flex items-center gap-2 font-light"
