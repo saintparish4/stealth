@@ -62,5 +62,3 @@ web/.vercel/
 # Scanner binary (built by GitHub Actions and committed to repo)
 # Uncomment the line below to exclude the binary from git
 # web/bin/
-
-CONTRIBUTING.md
