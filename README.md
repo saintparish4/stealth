@@ -73,18 +73,30 @@ Stealth parses Solidity contracts and identifies security issues before deployme
 
 ## Installation
 
+### Install from crates.io (Recommended)
+
+```bash
+# Install the latest version from crates.io
+cargo install stealth-scanner
+
+# After installation, use the 'stealth' command
+stealth scan ./contracts --recursive
+```
+
+### Install from Source
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/stealth.git
+git clone https://github.com/saintparish4/stealth.git
 cd stealth
 
 # Build from source
 cd core
 cargo build --release
 
-# The binary will be at core/target/release/core
+# The binary will be at core/target/release/stealth
 
-# Optional: Install globally
+# Optional: Install globally from source
 cargo install --path .
 
 # After installation, you can use 'stealth' command directly

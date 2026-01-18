@@ -52,22 +52,22 @@ jobs:
         run: |
           cd core
           cargo build --release --verbose
-          echo "✅ Rust binary built successfully"
+          echo "Rust binary built successfully"
       
       # Verify binary was created
       - name: Verify binary
         run: |
-          ls -lh core/target/release/core
-          file core/target/release/core
-          echo "Binary size: $(du -h core/target/release/core | cut -f1)"
+          ls -lh core/target/release/stealth
+          file core/target/release/stealth
+          echo "Binary size: $(du -h core/target/release/stealth | cut -f1)"
       
       # Copy binary to web project
       - name: Copy binary to web directory
         run: |
           mkdir -p web/bin
-          cp core/target/release/core web/bin/vanguard
+          cp core/target/release/stealth web/bin/vanguard
           chmod +x web/bin/vanguard
-          echo "✅ Binary copied to web/bin/vanguard"
+          echo "Binary copied to web/bin/vanguard"
           ls -lh web/bin/vanguard
       
       # Commit binary back to repository (only on push to main, not PRs)

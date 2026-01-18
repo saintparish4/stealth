@@ -1,7 +1,20 @@
 [package]
-name = "core"
+name = "stealth-scanner"
 version = "0.4.0"
-edition = "2024"
+edition = "2021"
+authors = ["Sharif Parish"]
+description = "A Solidity security scanner that detects common vulnerabilities through static analysis with intelligent pattern recognition"
+license = "MIT"
+repository = "https://github.com/saintparish4/stealth"
+homepage = "https://github.com/saintparish4/stealth"
+documentation = "https://github.com/saintparish4/stealth#readme"
+keywords = ["solidity", "security", "scanner", "vulnerability", "smart-contracts"]
+categories = ["development-tools", "security"]
+readme = "../README.md"
+
+[[bin]]
+name = "stealth"
+path = "src/main.rs"
 
 [dependencies]
 tree-sitter = "0.26.3"

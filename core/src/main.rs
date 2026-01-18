@@ -1,5 +1,5 @@
 // ============================================================================
-// Vanguard - Smart Contract Security Scanner
+// Stealth - Smart Contract Security Scanner
 // Version 0.4.0 - With Self-Service & Visibility Heuristics
 // ============================================================================
 
@@ -15,7 +15,7 @@ use walkdir::WalkDir;
 // ============================================================================
 
 #[derive(Parser)]
-#[command(name = "vanguard")]
+#[command(name = "stealth")]
 #[command(about = "Smart contract security scanner for Solidity", long_about = None)]
 #[command(version = "0.4.0")]
 struct Cli {
@@ -1697,7 +1697,7 @@ fn calculate_statistics(findings: &[Finding]) -> Statistics {
 
 fn print_results(path: &str, findings: &[Finding], stats: &Statistics) {
     println!("\n{}", "═".repeat(60).dimmed());
-    println!("{}", "Vanguard Security Scan Results".bold().underline());
+    println!("{}", "Stealth Security Scan Results".bold().underline());
     println!("{}", "═".repeat(60).dimmed());
     println!("{} {}\n", "Scanning:".bold(), path);
 
