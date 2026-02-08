@@ -1,17 +1,14 @@
 // ============================================================================
-// Stealth - Smart Contract Security Scanner
-// Version 0.4.0 - With Self-Service & Visibility Heuristics
+// Stealth - Smart Contract Security Scanner (binary)
+// Version 0.4.0 - Uses stealth_scanner lib for types, scan, output, suppression.
 // ============================================================================
 
 use clap::{Parser, Subcommand};
-use colored::*;
-use serde::Serialize;
-use std::fs;
 use std::path::Path;
-use walkdir::WalkDir;
+use stealth_scanner::*;
 
 // ============================================================================
-// CLI STRUCTURE
+// CLI
 // ============================================================================
 
 #[derive(Parser)]
@@ -25,313 +22,39 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Scan Solidity files for vulnerabilities
     Scan {
-        /// File or directory to scan
         path: String,
-
-        /// Output format (terminal, json)
         #[arg(short, long, default_value = "terminal")]
         format: String,
-
-        /// Recursively scan directories
         #[arg(short, long)]
         recursive: bool,
+        #[arg(long)]
+        baseline: Option<String>,
     },
 }
 
 // ============================================================================
-// DATA STRUCTURES
+// DETECTOR RUNNER (used by scan_file_with / scan_directory_with)
 // ============================================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-pub enum Severity {
-    Critical,
-    High,
-    Medium,
-    Low,
-}
-
-impl Severity {
-    fn as_colored_str(&self) -> ColoredString {
-        match self {
-            Severity::Critical => "CRITICAL".red().bold(),
-            Severity::High => "HIGH".red(),
-            Severity::Medium => "MEDIUM".yellow(),
-            Severity::Low => "LOW".blue(),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn as_str(&self) -> &'static str {
-        match self {
-            Severity::Critical => "CRITICAL",
-            Severity::High => "HIGH",
-            Severity::Medium => "MEDIUM",
-            Severity::Low => "LOW",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-pub enum Confidence {
-    High,
-    Medium,
-    Low,
-}
-
-impl Confidence {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Confidence::High => "High",
-            Confidence::Medium => "Medium",
-            Confidence::Low => "Low",
-        }
-    }
-}
-
-// ============================================================================
-// FUNCTION VISIBILITY
-// ============================================================================
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Visibility {
-    Public,
-    External,
-    Internal,
-    Private,
-}
-
-impl Visibility {
-    /// Risk level for reentrancy (higher = more risky)
-    #[allow(dead_code)]
-    pub fn risk_level(&self) -> u8 {
-        match self {
-            Visibility::External => 3,
-            Visibility::Public => 3,
-            Visibility::Internal => 1,
-            Visibility::Private => 0,
-        }
-    }
-
-    pub fn is_externally_callable(&self) -> bool {
-        matches!(self, Visibility::Public | Visibility::External)
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Visibility::Public => "public",
-            Visibility::External => "external",
-            Visibility::Internal => "internal",
-            Visibility::Private => "private",
-        }
-    }
-}
-
-// ============================================================================
-// FINDING STRUCTURE
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Finding {
-    pub severity: Severity,
-    pub confidence: Confidence,
-    pub line: usize,
-    pub vulnerability_type: String,
-    pub message: String,
-    pub suggestion: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-}
-
-impl Finding {
-    fn print(&self) {
-        println!(
-            "[{}] {} at line {} (Confidence: {})",
-            self.severity.as_colored_str(),
-            self.vulnerability_type.bold(),
-            self.line,
-            self.confidence.as_str().dimmed()
-        );
-        println!("  {} {}", "→".cyan(), self.message);
-        println!("  {} {}", "Fix:".green().bold(), self.suggestion);
-        println!();
-    }
-}
-
-#[derive(Default, Serialize)]
-struct Statistics {
-    critical: u32,
-    high: u32,
-    medium: u32,
-    low: u32,
-    confidence_high: u32,
-    confidence_medium: u32,
-    confidence_low: u32,
-}
-
-// ============================================================================
-// SELF-SERVICE PATTERN DETECTION HELPERS
-// ============================================================================
-
-/// Check if a function name indicates a self-service pattern
-fn is_self_service_function_name(func_name: &str) -> bool {
-    let lower_name = func_name.to_lowercase();
-
-    let self_service_names = [
-        "deposit",
-        "withdraw",
-        "withdrawall",
-        "withdrawto",
-        "claim",
-        "claimreward",
-        "claimrewards",
-        "claimall",
-        "stake",
-        "unstake",
-        "restake",
-        "transfer",
-        "approve",
-        "transferfrom",
-        "mint",
-        "burn",
-        "redeem",
-        "redeemall",
-        "exit",
-        "leave",
-        "emergencywithdraw",
-        "harvest",
-        "compound",
-        "reinvest",
-    ];
-
-    self_service_names
-        .iter()
-        .any(|&name| lower_name.contains(name))
-}
-
-/// Check if a function operates only on msg.sender's data
-fn is_self_service_pattern(func_text: &str) -> bool {
-    // Pattern 1: Operations on msg.sender's mappings
-    let has_sender_mapping = func_text.contains("balances[msg.sender]")
-        || func_text.contains("_balances[msg.sender]")
-        || func_text.contains("deposits[msg.sender]")
-        || func_text.contains("stakes[msg.sender]")
-        || func_text.contains("rewards[msg.sender]")
-        || func_text.contains("userInfo[msg.sender]");
-
-    // Pattern 2: Transfer to msg.sender
-    let transfer_to_sender = func_text.contains("payable(msg.sender)")
-        || func_text.contains("msg.sender.call{value")
-        || func_text.contains("(msg.sender).transfer(")
-        || func_text.contains("safeTransfer(msg.sender");
-
-    // Pattern 3: Token transfer to msg.sender
-    let token_to_sender = func_text.contains("transfer(msg.sender,")
-        || func_text.contains("_transfer(address(this), msg.sender");
-
-    // Pattern 4: No arbitrary address parameter for fund destination
-    let has_arbitrary_recipient = func_text.contains("address to,")
-        || func_text.contains("address _to,")
-        || func_text.contains("address recipient,")
-        || func_text.contains("address _recipient,");
-
-    // It's self-service if it operates on sender's data AND doesn't allow arbitrary recipients
-    (has_sender_mapping || transfer_to_sender || token_to_sender) && !has_arbitrary_recipient
-}
-
-/// Combined check for self-service pattern (name + body analysis)
-fn should_skip_access_control_warning(func_name: &str, func_text: &str) -> bool {
-    is_self_service_function_name(func_name) && is_self_service_pattern(func_text)
-}
-
-// ============================================================================
-// FUNCTION VISIBILITY HELPERS
-// ============================================================================
-
-/// Extract function visibility from function text
-fn get_function_visibility(func_text: &str) -> Visibility {
-    // Look at the signature portion (before the {)
-    let signature_end = func_text.find('{').unwrap_or(func_text.len());
-    let signature = &func_text[..signature_end];
-
-    if signature.contains(" private")
-        || signature.contains("\tprivate")
-        || signature.contains("(private")
-    {
-        Visibility::Private
-    } else if signature.contains(" internal")
-        || signature.contains("\tinternal")
-        || signature.contains("(internal")
-    {
-        Visibility::Internal
-    } else if signature.contains(" external")
-        || signature.contains("\texternal")
-        || signature.contains("(external")
-    {
-        Visibility::External
-    } else {
-        Visibility::Public
-    }
-}
-
-/// Get confidence level based on visibility
-/// Private/Internal functions are less risky for reentrancy
-fn visibility_adjusted_confidence(base: Confidence, visibility: Visibility) -> Confidence {
-    match (base, visibility) {
-        // Downgrade confidence for internal/private functions
-        (Confidence::High, Visibility::Private) => Confidence::Low,
-        (Confidence::High, Visibility::Internal) => Confidence::Medium,
-        (Confidence::Medium, Visibility::Private) => Confidence::Low,
-        // Keep base confidence otherwise
-        _ => base,
-    }
-}
-
-// ============================================================================
-// GENERAL HELPER FUNCTIONS
-// ============================================================================
-
-/// Extract function name from function text
-fn extract_function_name(func_text: &str) -> String {
-    // Look for "function name(" pattern
-    if let Some(start) = func_text.find("function ") {
-        let after_function = &func_text[start + 9..];
-        if let Some(end) = after_function.find('(') {
-            return after_function[..end].trim().to_string();
-        }
-    }
-    String::new()
-}
-
-/// Check if function has a modifier
-fn has_modifier(func_text: &str, modifiers: &[&str]) -> bool {
-    modifiers.iter().any(|m| func_text.contains(m))
-}
-
-/// Check for reentrancy guard modifiers
-fn has_reentrancy_guard(func_text: &str) -> bool {
-    has_modifier(
-        func_text,
-        &["nonReentrant", "noReentrant", "reentrancyGuard", "lock"],
-    )
-}
-
-/// Check if function has access control
-fn has_access_control(func_text: &str) -> bool {
-    // Check modifiers
-    let has_modifier = func_text.contains("onlyOwner")
-        || func_text.contains("onlyAdmin")
-        || func_text.contains("onlyRole")
-        || func_text.contains("onlyAuthorized");
-
-    // Check require statements with msg.sender
-    let has_require_sender = func_text.contains("require")
-        && (func_text.contains("msg.sender == owner")
-            || func_text.contains("msg.sender == admin")
-            || func_text.contains("_owner"));
-
-    has_modifier || has_require_sender
+fn run_all_detectors(
+    tree: &tree_sitter::Tree,
+    source: &str,
+    findings: &mut Vec<Finding>,
+) {
+    detect_reentrancy(tree, source, findings);
+    detect_unchecked_calls(tree, source, findings);
+    detect_tx_origin(tree, source, findings);
+    detect_access_control(tree, source, findings);
+    detect_dangerous_delegatecall(tree, source, findings);
+    detect_timestamp_dependence(tree, source, findings);
+    detect_unsafe_random(tree, source, findings);
+    detect_integer_overflow(tree, source, findings);
+    detect_flash_loan_vulnerability(tree, source, findings);
+    detect_storage_collision(tree, source, findings);
+    detect_front_running(tree, source, findings);
+    detect_dos_loops(tree, source, findings);
+    detect_unchecked_erc20(tree, source, findings);
 }
 
 // ============================================================================
@@ -1591,167 +1314,7 @@ fn find_unchecked_erc20(node: &tree_sitter::Node, source: &str, findings: &mut V
 }
 
 // ============================================================================
-// MAIN SCANNING LOGIC
-// ============================================================================
-
-fn scan_file(file_path: &str) -> Vec<Finding> {
-    let source = match fs::read_to_string(file_path) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!(
-                "{} Could not read '{}': {}",
-                "Error:".red().bold(),
-                file_path,
-                e
-            );
-            return Vec::new();
-        }
-    };
-
-    let mut parser = tree_sitter::Parser::new();
-    if let Err(e) = parser.set_language(&tree_sitter_solidity::LANGUAGE.into()) {
-        eprintln!(
-            "{} Failed to load Solidity grammar: {}",
-            "Error:".red().bold(),
-            e
-        );
-        return Vec::new();
-    }
-
-    let tree = match parser.parse(&source, None) {
-        Some(tree) => tree,
-        None => {
-            eprintln!("{} Failed to parse '{}'", "Error:".red().bold(), file_path);
-            return Vec::new();
-        }
-    };
-
-    let mut findings = Vec::new();
-
-    // Run all detectors
-    detect_reentrancy(&tree, &source, &mut findings);
-    detect_unchecked_calls(&tree, &source, &mut findings);
-    detect_tx_origin(&tree, &source, &mut findings);
-    detect_access_control(&tree, &source, &mut findings);
-    detect_dangerous_delegatecall(&tree, &source, &mut findings);
-    detect_timestamp_dependence(&tree, &source, &mut findings);
-    detect_unsafe_random(&tree, &source, &mut findings);
-    detect_integer_overflow(&tree, &source, &mut findings);
-    detect_flash_loan_vulnerability(&tree, &source, &mut findings);
-    detect_storage_collision(&tree, &source, &mut findings);
-    detect_front_running(&tree, &source, &mut findings);
-    detect_dos_loops(&tree, &source, &mut findings);
-    detect_unchecked_erc20(&tree, &source, &mut findings);
-
-    // Add file path to findings
-    for finding in &mut findings {
-        finding.file = Some(file_path.to_string());
-    }
-
-    findings
-}
-
-fn scan_directory(dir_path: &str, recursive: bool) -> Vec<Finding> {
-    let mut all_findings = Vec::new();
-
-    let walker = if recursive {
-        WalkDir::new(dir_path)
-    } else {
-        WalkDir::new(dir_path).max_depth(1)
-    };
-
-    for entry in walker.into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |e| e == "sol") {
-            let file_findings = scan_file(path.to_str().unwrap_or_default());
-            all_findings.extend(file_findings);
-        }
-    }
-
-    all_findings
-}
-
-fn calculate_statistics(findings: &[Finding]) -> Statistics {
-    let mut stats = Statistics::default();
-
-    for finding in findings {
-        match finding.severity {
-            Severity::Critical => stats.critical += 1,
-            Severity::High => stats.high += 1,
-            Severity::Medium => stats.medium += 1,
-            Severity::Low => stats.low += 1,
-        }
-        match finding.confidence {
-            Confidence::High => stats.confidence_high += 1,
-            Confidence::Medium => stats.confidence_medium += 1,
-            Confidence::Low => stats.confidence_low += 1,
-        }
-    }
-
-    stats
-}
-
-// ============================================================================
-// OUTPUT FORMATTING
-// ============================================================================
-
-fn print_results(path: &str, findings: &[Finding], stats: &Statistics) {
-    println!("\n{}", "═".repeat(60).dimmed());
-    println!("{}", "Stealth Security Scan Results".bold().underline());
-    println!("{}", "═".repeat(60).dimmed());
-    println!("{} {}\n", "Scanning:".bold(), path);
-
-    if findings.is_empty() {
-        println!("{}", "✓ No vulnerabilities found!".green().bold());
-    } else {
-        println!(
-            "{} {} vulnerabilities found:\n",
-            "⚠".yellow(),
-            findings.len()
-        );
-
-        for finding in findings {
-            finding.print();
-        }
-
-        // Print summary
-        println!("{}", "─".repeat(60).dimmed());
-        println!("{}", "Summary".bold());
-        if stats.critical > 0 {
-            println!("  {} Critical: {}", "●".red(), stats.critical);
-        }
-        if stats.high > 0 {
-            println!("  {} High: {}", "●".red(), stats.high);
-        }
-        if stats.medium > 0 {
-            println!("  {} Medium: {}", "●".yellow(), stats.medium);
-        }
-        if stats.low > 0 {
-            println!("  {} Low: {}", "●".blue(), stats.low);
-        }
-    }
-    println!();
-}
-
-fn print_json(findings: &[Finding], stats: &Statistics) {
-    #[derive(Serialize)]
-    struct Output<'a> {
-        findings: &'a [Finding],
-        statistics: &'a Statistics,
-    }
-
-    let output = Output {
-        findings,
-        statistics: stats,
-    };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output).unwrap_or_default()
-    );
-}
-
-// ============================================================================
-// MAIN ENTRY POINT
+// MAIN
 // ============================================================================
 
 fn main() {
@@ -1762,12 +1325,18 @@ fn main() {
             path,
             format,
             recursive,
+            baseline,
         } => {
-            let findings = if Path::new(&path).is_dir() {
-                scan_directory(&path, recursive)
+            let mut findings = if Path::new(&path).is_dir() {
+                scan_directory_with(&path, recursive, run_all_detectors)
             } else {
-                scan_file(&path)
+                scan_file_with(&path, run_all_detectors)
             };
+
+            if let Some(ref baseline_path) = baseline {
+                let baseline_set = load_baseline(baseline_path);
+                findings = filter_findings_by_baseline(findings, &baseline_set);
+            }
 
             let stats = calculate_statistics(&findings);
 
@@ -1776,7 +1345,6 @@ fn main() {
                 _ => print_results(&path, &findings, &stats),
             }
 
-            // Exit with code based on findings
             let exit_code = if stats.critical > 0 || stats.high > 0 {
                 2
             } else if stats.medium > 0 {
@@ -1797,6 +1365,16 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+
+    /// Parse a Solidity source string into a tree for detector tests.
+    fn parse_solidity(source: &str) -> tree_sitter::Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_solidity::LANGUAGE.into())
+            .expect("Solidity language");
+        parser.parse(source, None).expect("parse")
+    }
 
     #[test]
     fn test_self_service_function_names() {
@@ -1865,6 +1443,362 @@ mod tests {
         assert_eq!(
             visibility_adjusted_confidence(Confidence::High, Visibility::Internal),
             Confidence::Medium
+        );
+    }
+
+    // ========== Detector tests: minimal Solidity snippets, assert on findings ==========
+
+    #[test]
+    fn detector_reentrancy_finds_state_change_after_call() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    mapping(address => uint256) balances;
+    function withdraw(uint256 amount) public {
+        require(balances[msg.sender] >= amount);
+        (bool ok, ) = msg.sender.call{value: amount}("");
+        require(ok);
+        balances[msg.sender] -= amount;
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_reentrancy(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "reentrancy detector should find state change after call"
+        );
+        let f = &findings[0];
+        assert_eq!(f.vulnerability_type, "Reentrancy");
+        assert_eq!(f.severity, Severity::High);
+    }
+
+    #[test]
+    fn detector_tx_origin_finds_auth_use() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    address owner;
+    function withdraw() public {
+        require(tx.origin == owner);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_tx_origin(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "tx.origin detector should find auth use"
+        );
+        assert_eq!(findings[0].vulnerability_type, "tx.origin Authentication");
+        assert_eq!(findings[0].severity, Severity::High);
+    }
+
+    #[test]
+    fn detector_timestamp_dependence_finds_modulo() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function claim() public {
+        require(block.timestamp % 15 == 0);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_timestamp_dependence(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "timestamp detector should find modulo use"
+        );
+        assert_eq!(findings[0].vulnerability_type, "Timestamp Dependence");
+    }
+
+    #[test]
+    fn detector_unsafe_random_finds_block_properties() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function lottery() public view returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % 100;
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_unsafe_random(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "unsafe random detector should find block-based randomness"
+        );
+        assert_eq!(findings[0].vulnerability_type, "Unsafe Randomness");
+    }
+
+    #[test]
+    fn detector_access_control_finds_sensitive_without_auth() {
+        // Withdraw with arbitrary recipient (no self-service): triggers "Unrestricted Fund Transfer"
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function withdrawAll(address to) public {
+        (bool ok,) = payable(to).call{value: address(this).balance}("");
+        require(ok);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_access_control(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "access control detector should find withdraw with arbitrary recipient"
+        );
+        assert_eq!(
+            findings[0].vulnerability_type, "Unrestricted Fund Transfer",
+            "expected Unrestricted Fund Transfer when withdraw allows arbitrary address"
+        );
+    }
+
+    #[test]
+    fn detector_unchecked_erc20_flags_transfer_without_check() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function pay(address token, address to, uint256 amt) public {
+        IERC20(token).transfer(to, amt);
+    }
+}
+interface IERC20 { function transfer(address to, uint256 amount) external returns (bool); }
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_unchecked_erc20(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "unchecked ERC20 detector should find transfer without check"
+        );
+        let vuln_type = &findings[0].vulnerability_type;
+        assert!(
+            vuln_type.contains("ERC20") || vuln_type.contains("SafeERC20"),
+            "expected ERC20-related finding, got: {}",
+            vuln_type
+        );
+    }
+
+    #[test]
+    fn detector_dangerous_delegatecall_finds_user_controlled_target() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function execute(address target, bytes memory data) public {
+        target.delegatecall(data);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_dangerous_delegatecall(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "delegatecall detector should find user-controlled target"
+        );
+        assert_eq!(findings[0].vulnerability_type, "Dangerous Delegatecall");
+    }
+
+    #[test]
+    fn detector_unchecked_call_finds_call_without_assignment() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function forward(address payable to) public {
+        to.call{value: address(this).balance}("");
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_unchecked_calls(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "unchecked call detector should find .call without return check"
+        );
+        assert_eq!(findings[0].vulnerability_type, "Unchecked Call");
+        assert_eq!(findings[0].severity, Severity::Medium);
+    }
+
+    #[test]
+    fn detector_integer_overflow_flags_unchecked_block() {
+        let source = r#"
+pragma solidity ^0.7.0;
+contract C {
+    function sub(uint256 a, uint256 b) public pure returns (uint256) {
+        unchecked {
+            return a - b;
+        }
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_integer_overflow(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "integer overflow detector should find unchecked arithmetic in <0.8 or unchecked block"
+        );
+        assert_eq!(findings[0].vulnerability_type, "Integer Overflow/Underflow");
+    }
+
+    #[test]
+    fn detector_no_false_positive_on_self_service_withdraw() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    mapping(address => uint256) public balances;
+    function withdraw() public {
+        uint256 amt = balances[msg.sender];
+        balances[msg.sender] = 0;
+        (bool ok, ) = payable(msg.sender).call{value: amt}("");
+        require(ok);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_access_control(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "access control should not flag self-service withdraw (operates on msg.sender only)"
+        );
+    }
+
+    // ========== Integration test: full scan on comprehensive contract ==========
+
+    #[test]
+    fn integration_scan_comprehensive_vulnerabilities_finds_multiple_types() {
+        let path = "contracts/comprehensive-vulnerabilities.sol";
+        let path_alt = "../contracts/comprehensive-vulnerabilities.sol";
+        let path_used = if std::path::Path::new(path).exists() {
+            path
+        } else {
+            path_alt
+        };
+        let findings = scan_file_with(path_used, run_all_detectors);
+        assert!(
+            findings.len() >= 5,
+            "comprehensive-vulnerabilities.sol should yield at least 5 findings (got {}). Run from core/ with contracts/ present.",
+            findings.len()
+        );
+        let types: std::collections::HashSet<_> = findings
+            .iter()
+            .map(|f| f.vulnerability_type.as_str())
+            .collect();
+        assert!(
+            types.contains("Reentrancy"),
+            "expected Reentrancy in findings: {:?}",
+            types
+        );
+        assert!(
+            types.contains("tx.origin Authentication"),
+            "expected tx.origin in findings: {:?}",
+            types
+        );
+        assert!(
+            types.contains("Missing Access Control") || types.contains("Dangerous Delegatecall"),
+            "expected access control or delegatecall: {:?}",
+            types
+        );
+    }
+
+    // ========== Suppression: stealth-ignore and baseline ==========
+
+    #[test]
+    fn suppression_parse_stealth_ignores() {
+        let source = r#"
+// stealth-ignore: reentrancy
+        (bool ok,) = msg.sender.call{value: 1}("");
+// stealth-ignore: tx.origin
+        require(tx.origin == owner);
+// stealth-ignore: reentrancy L20
+"#;
+        let ignores = parse_stealth_ignores(source);
+        assert!(!ignores.is_empty());
+        // Line 2 has comment -> suppresses line 2 and 3
+        assert!(ignores
+            .iter()
+            .any(|(l, t)| *l == 2 && t.as_deref() == Some("reentrancy")));
+        assert!(ignores
+            .iter()
+            .any(|(l, t)| *l == 3 && t.as_deref() == Some("reentrancy")));
+        // Line 5 has comment -> suppresses line 5 and 6 (type stored as normalized "tx.origin")
+        assert!(ignores
+            .iter()
+            .any(|(l, t)| *l == 5 && t.as_deref() == Some("tx.origin")));
+        // L20 targets line 20 only
+        assert!(ignores
+            .iter()
+            .any(|(l, t)| *l == 20 && t.as_deref() == Some("reentrancy")));
+    }
+
+    #[test]
+    fn suppression_inline_ignores_finding() {
+        // The comment must be on or just above the line the detector reports (the .call line).
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function withdraw(uint256 amount) public {
+        require(balances[msg.sender] >= amount);
+        // stealth-ignore: reentrancy
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok);
+        balances[msg.sender] -= amount;
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_reentrancy(&tree, source, &mut findings);
+        assert!(
+            !findings.is_empty(),
+            "reentrancy should be found without filter"
+        );
+        let filtered = filter_findings_by_inline_ignores(findings, source);
+        assert!(
+            filtered.is_empty(),
+            "finding should be suppressed by // stealth-ignore: reentrancy on line above"
+        );
+    }
+
+    #[test]
+    fn suppression_baseline_filters_known_findings() {
+        let baseline_json = r#"{"findings":[{"severity":"High","confidence":"High","line":5,"vulnerability_type":"Reentrancy","message":"","suggestion":"","file":"x.sol"}],"statistics":{"critical":0,"high":1,"medium":0,"low":0,"confidence_high":1,"confidence_medium":0,"confidence_low":0}}"#;
+        let baseline: BaselineFile = serde_json::from_str(baseline_json).expect("parse");
+        let set: HashSet<_> = baseline
+            .findings
+            .into_iter()
+            .map(|f| {
+                (
+                    f.file.unwrap_or_default(),
+                    f.line as usize,
+                    normalize_vuln_type(&f.vulnerability_type),
+                )
+            })
+            .collect();
+        let finding = Finding {
+            severity: Severity::High,
+            confidence: Confidence::High,
+            line: 5,
+            vulnerability_type: "Reentrancy".to_string(),
+            message: String::new(),
+            suggestion: String::new(),
+            file: Some("x.sol".to_string()),
+        };
+        let findings = vec![finding];
+        let filtered = filter_findings_by_baseline(findings, &set);
+        assert!(
+            filtered.is_empty(),
+            "finding in baseline should be filtered out"
         );
     }
 }

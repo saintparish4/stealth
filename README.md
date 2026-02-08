@@ -202,9 +202,83 @@ Arguments:
 Options:
   -f, --format <FORMAT>      Output format: terminal or json [default: terminal]
   -r, --recursive           Recursively scan directories
+  --baseline <FILE>         Only report findings not in baseline JSON (CI fails on new only)
   -h, --help                Print help
   -V, --version             Print version
 ```
+
+### Suppression and baseline
+
+**Inline suppression** — Add a comment on or above the line you want to ignore:
+
+```solidity
+// stealth-ignore: reentrancy
+(bool ok,) = msg.sender.call{value: amount}("");
+
+// stealth-ignore: tx.origin
+require(tx.origin == owner);
+```
+
+You can target a specific line with `L<line>` (e.g. `// stealth-ignore: reentrancy L42`). Type matching is case-insensitive.
+
+**Baseline** — To fail CI only when *new* findings appear, capture a baseline once, then pass it on subsequent runs:
+
+```bash
+# Capture current findings as baseline (run from repo root or same path you'll use in CI)
+cd core
+cargo run --release -- scan ./contracts --recursive --format json > baseline.json
+
+# Later: only report findings not in baseline (exit 0 if no new findings)
+cargo run --release -- scan ./contracts --recursive --baseline baseline.json
+```
+
+---
+
+## Testing
+
+### Run the test suite
+
+From the `core` directory:
+
+```bash
+cd core
+cargo test
+```
+
+Run only detector or suppression tests:
+
+```bash
+cargo test detector_
+cargo test suppression_
+```
+
+### Manually test inline suppression
+
+1. Scan a file that has a known finding (e.g. reentrancy):
+
+   ```bash
+   cd core
+   cargo run --release -- scan contracts/comprehensive-vulnerabilities.sol
+   ```
+
+   Note the line number of a finding (e.g. Reentrancy at line 19).
+
+2. Add `// stealth-ignore: reentrancy` on the line above that finding in the contract (or on the same line as the reported code).
+
+3. Scan again; that finding should no longer appear.
+
+### Manually test baseline
+
+1. Create a baseline from current scan results:
+
+   ```bash
+   cd core
+   cargo run --release -- scan contracts/comprehensive-vulnerabilities.sol --format json > baseline.json
+   ```
+
+2. Run again with `--baseline baseline.json`: the same file’s findings are now treated as “known”, so **no findings** are reported and exit code is 0.
+
+3. Add a new vulnerability to the contract (or scan a different file that has issues). Run with `--baseline baseline.json`: only findings **not** in the baseline are reported, and the exit code reflects only those new issues.
 
 ---
 
@@ -229,7 +303,9 @@ Contributions are welcome. Please open an issue to discuss proposed changes befo
 
 ## Web Interface
 
-Stealth includes a modern web interface built with Next.js. The web application provides:
+Stealth includes a modern web interface built with Next.js. The web app bundles the scanner binary under the **legacy name `vanguard`** (e.g. `web/bin/vanguard`); the CLI and docs use the name **Stealth**. Both refer to the same scanner.
+
+The web application provides:
 
 - Interactive code editor with syntax highlighting
 - Real-time vulnerability scanning

@@ -1,23 +1,20 @@
-## Security Policy
+# Security Policy
 
-### Reporting a Vulnerability
+## Reporting a Vulnerability
 
-If you believe you've found a security vulnerability, please follow these steps:
+If you believe you've found a security vulnerability in Stealth (the scanner or this repository), please report it responsibly:
 
-1. Do not disclose the vulnerability publicly until it has been addressed by our team.
-2. Email your findings to **[NOTE: describe your means of reporting here.]** Include:
-    - A description of the vulnerability
-    - Steps to reproduce the vulnerability
-    - Potential impact of the vulnerability
-    - Any suggestions for mitigation
-    - Any other relevant information
-3. We will respond to your report within 72 hours.
-4. If the issue is confirmed, we will release a patch as soon as possible.
+1. **Do not disclose the issue publicly** until it has been addressed.
+2. **Open a GitHub Security Advisory** (preferred):
+   - Go to this repository on GitHub.
+   - Click **Security** → **Advisories** → **Report a vulnerability**.
+   - Describe the issue, steps to reproduce, impact, and any mitigation ideas.
+3. We will acknowledge your report and respond as soon as possible. If the issue is confirmed, we will work on a fix and coordinate disclosure.
 
-### Disclosure Policy
+## Disclosure
 
-If the issue is confirmed, we will release a patch as soon as possible. Once a patch is released, we will disclose the issue publicly. If 90 days has elapsed and we still don't have a fix, we will disclose the issue publicly.
+We will release a patch for confirmed vulnerabilities as soon as practical. After a fix is released, we may disclose the issue publicly (e.g. in release notes or an advisory). If 90 days pass without a fix, we may still disclose to allow the community to take action.
 
 ## Supported Versions
 
-We only support the latest version of Stealth. Older versions are not supported.
+Only the latest release of Stealth is supported with security updates. We recommend upgrading to the newest version.

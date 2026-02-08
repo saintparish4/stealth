@@ -12,6 +12,10 @@ keywords = ["solidity", "security", "scanner", "vulnerability", "smart-contracts
 categories = ["development-tools", "security"]
 readme = "../README.md"
 
+[lib]
+name = "stealth_scanner"
+path = "src/lib.rs"
+
 [[bin]]
 name = "stealth"
 path = "src/main.rs"
