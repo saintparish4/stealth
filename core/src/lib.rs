@@ -1,8 +1,10 @@
 //! Stealth - Smart Contract Security Scanner (library).
 //!
-//! Modules: types, helpers, suppression, output, scan.
-//! Detectors live in the binary; use `scan_file_with` / `scan_directory_with` with a detector runner.
+//! Modules: types, helpers, suppression, output, scan, detectors.
+//! Use `scan_file_with` / `scan_directory_with` with `detectors::run_all_detectors`
+//! or invoke individual `detect_*` functions directly.
 
+pub mod detectors;
 pub mod helpers;
 pub mod output;
 pub mod scan;
