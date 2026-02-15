@@ -63,6 +63,7 @@ fn main() {
 
             match format.as_str() {
                 "json" => print_json(&findings, &stats),
+                "sarif" => stealth_scanner::output::print_sarif(&findings),
                 _ => print_results(&path, &findings, &stats),
             }
 
