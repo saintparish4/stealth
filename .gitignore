@@ -62,4 +62,8 @@ web/.vercel/
 # Scanner binary (built by GitHub Actions and committed to repo)
 # Uncomment the line below to exclude the binary from git
 # web/bin/
-stealth.yml 
+stealth.yml
+
+# Not ready to use yet
+.pre-commit-config.yaml
+CHANGELOG.md
