@@ -67,3 +67,4 @@ stealth.yml
 # Not ready to use yet
 .pre-commit-config.yaml
 CHANGELOG.md
+WASM_AND_VSCODE_IMPLEMENTATION.txt

@@ -1,5 +1,6 @@
 //! Core types: severity, confidence, visibility, findings, statistics.
 
+#[cfg(feature = "cli")]
 use colored::*;
 use serde::Serialize;
 
@@ -12,6 +13,7 @@ pub enum Severity {
 }
 
 impl Severity {
+    #[cfg(feature = "cli")]
     pub fn as_colored_str(&self) -> ColoredString {
         match self {
             Severity::Critical => "CRITICAL".red().bold(),
@@ -21,7 +23,6 @@ impl Severity {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             Severity::Critical => "CRITICAL",
@@ -58,7 +59,6 @@ pub enum Visibility {
 }
 
 impl Visibility {
-    #[allow(dead_code)]
     pub fn risk_level(&self) -> u8 {
         match self {
             Visibility::External => 3,
@@ -95,6 +95,7 @@ pub struct Finding {
 }
 
 impl Finding {
+    #[cfg(feature = "cli")]
     pub fn print(&self) {
         println!(
             "[{}] {} at line {} (Confidence: {})",
