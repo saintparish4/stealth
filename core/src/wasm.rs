@@ -3,6 +3,11 @@
 //! Built with: wasm-pack build --target web --features wasm --no-default-features
 //! Consumers call `scan_source(solidityCode)` and receive a JSON string
 //! containing an array of Finding objects.
+//!
+//! Alternative target: wasm32-unknown-emscripten (has libc; tree-sitter C builds).
+//! See BOOK/chapter1.md "Trying wasm32-unknown-emscripten". Build with:
+//!   cargo build --target wasm32-unknown-emscripten --features wasm --no-default-features
+//! Note: wasm-bindgen does not support emscripten; use extern "C" exports for JS if needed.
 
 use wasm_bindgen::prelude::*;
 

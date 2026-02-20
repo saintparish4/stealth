@@ -1,0 +1,73 @@
+{
+  "name": "stealth-scanner",
+  "displayName": "Stealth - Solidity Security Scanner",
+  "description": "Real-time Solidity vulnerability detection powered by the Stealth scanner engine",
+  "version": "0.1.0",
+  "publisher": "stealth-security",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saintparish4/stealth"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "solidity",
+    "security",
+    "smart contracts",
+    "vulnerability",
+    "audit"
+  ],
+  "activationEvents": [
+    "onLanguage:solidity"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Stealth Scanner",
+      "properties": {
+        "stealth.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the stealth-lsp binary. Leave empty to use the binary from PATH."
+        },
+        "stealth.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan Solidity files on save."
+        },
+        "stealth.minimumSeverity": {
+          "type": "string",
+          "default": "Low",
+          "enum": [
+            "Critical",
+            "High",
+            "Medium",
+            "Low"
+          ],
+          "description": "Minimum severity level to report."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^25.3.0",
+    "typescript": "^5.5.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

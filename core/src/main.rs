@@ -308,6 +308,10 @@ interface IERC20 { function transfer(address to, uint256 amount) external return
             "expected ERC20-related finding, got: {}",
             vuln_type
         );
+        assert!(
+            findings.iter().all(|f| f.vulnerability_type != "Missing SafeERC20"),
+            "function-level 'Missing SafeERC20' should no longer be emitted"
+        );
     }
 
     #[test]

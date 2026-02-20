@@ -53,13 +53,11 @@ pub fn parse_stealth_ignores(source: &str) -> Vec<(usize, Option<String>)> {
     result
 }
 
-/// Returns true if this finding is suppressed by an inline stealth-ignore comment.
-fn is_suppressed_by_inline(finding: &Finding, source: &str) -> bool {
-    let ignores = parse_stealth_ignores(source);
-    let line = finding.line;
+/// Returns true if this finding is suppressed by a pre-parsed set of inline ignores.
+fn is_suppressed(ignores: &[(usize, Option<String>)], finding: &Finding) -> bool {
     let type_norm = normalize_vuln_type(&finding.vulnerability_type);
-    for (ignored_line, type_opt) in &ignores {
-        if *ignored_line != line {
+    for (ignored_line, type_opt) in ignores {
+        if *ignored_line != finding.line {
             continue;
         }
         match type_opt {
@@ -74,9 +72,10 @@ fn is_suppressed_by_inline(finding: &Finding, source: &str) -> bool {
 
 /// Filter out findings that are suppressed by // stealth-ignore: in the source.
 pub fn filter_findings_by_inline_ignores(findings: Vec<Finding>, source: &str) -> Vec<Finding> {
+    let ignores = parse_stealth_ignores(source);
     findings
         .into_iter()
-        .filter(|f| !is_suppressed_by_inline(f, source))
+        .filter(|f| !is_suppressed(&ignores, f))
         .collect()
 }
 

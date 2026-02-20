@@ -68,3 +68,7 @@ stealth.yml
 .pre-commit-config.yaml
 CHANGELOG.md
 WASM_AND_VSCODE_IMPLEMENTATION.txt
+
+# Personal
+book/
+cmd/

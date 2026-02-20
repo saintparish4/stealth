@@ -15,6 +15,8 @@ pub mod output;
 pub mod scan;
 #[cfg(feature = "wasm")]
 pub mod wasm;
+#[cfg(feature = "lsp")]
+pub mod lsp;
 
 // --- Re-exports (always available) ------------------------------------------
 
