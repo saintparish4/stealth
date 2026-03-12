@@ -1,75 +1,76 @@
 //! Detector: Reentrancy vulnerabilities.
 //!
 //! Flags external calls (`.call`, `.transfer`, `.send`) followed by state changes
-//! without a reentrancy guard modifier.
+//! without a reentrancy guard modifier. Uses AST traversal to identify call nodes
+//! and assignment expressions, avoiding false positives from comments/strings.
 
-use crate::helpers::{
-    get_function_visibility, has_reentrancy_guard, visibility_adjusted_confidence,
+use crate::ast_utils::{
+    find_nodes_of_kind, func_body, function_visibility, has_reentrancy_guard, is_external_call,
+    is_state_write,
 };
+use crate::detector_trait::{AnalysisContext, Detector};
+use crate::helpers::visibility_adjusted_confidence;
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_reentrancy(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
-    let root_node = tree.root_node();
-    find_reentrancy(&root_node, source, findings);
-}
+pub struct ReentrancyDetector;
 
-fn find_reentrancy(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
-    if node.kind() == "function_definition" {
-        let func_text = &source[node.start_byte()..node.end_byte()];
+impl Detector for ReentrancyDetector {
+    fn id(&self) -> &'static str {
+        "reentrancy"
+    }
+    fn name(&self) -> &'static str {
+        "Reentrancy"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn owasp_category(&self) -> Option<&'static str> {
+        Some("SC02:2025 - Reentrancy Attacks")
+    }
+    fn run(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        for func in &ctx.functions {
+            if has_reentrancy_guard(func, ctx.source) {
+                continue;
+            }
 
-        // Skip if has reentrancy guard
-        if has_reentrancy_guard(func_text) {
-            return;
-        }
+            let body = match func_body(func) {
+                Some(b) => b,
+                None => continue,
+            };
 
-        // Get visibility for confidence adjustment
-        let visibility = get_function_visibility(func_text);
+            let visibility = function_visibility(func, ctx.source);
 
-        // Track state changes and external calls
-        let mut external_call_line: Option<usize> = None;
-        let mut state_change_line: Option<usize> = None;
-        let mut external_call_found = false;
+            let calls = find_nodes_of_kind(&body, "call_expression");
+            let mut earliest_external_call_line: Option<usize> = None;
 
-        // Check for external calls
-        let has_call = func_text.contains(".call{") || func_text.contains(".call(");
-        let has_transfer = func_text.contains(".transfer(");
-        let has_send = func_text.contains(".send(");
-
-        if has_call || has_transfer || has_send {
-            // Find the line of the external call
-            for (i, line) in source[node.start_byte()..node.end_byte()]
-                .lines()
-                .enumerate()
-            {
-                let global_line = node.start_position().row + i + 1;
-                if line.contains(".call{")
-                    || line.contains(".call(")
-                    || line.contains(".transfer(")
-                    || line.contains(".send(")
-                {
-                    external_call_line = Some(global_line);
-                    external_call_found = true;
-                }
-                // Look for state changes AFTER external call
-                if external_call_found
-                    && (line.contains(" = ") || line.contains(" += ") || line.contains(" -= "))
-                    && !line.contains("bool ")
-                    && !line.contains("uint")
-                    && !line.contains("address ")
-                {
-                    state_change_line = Some(global_line);
-                    break;
+            for call in &calls {
+                if is_external_call(call, ctx.source) {
+                    let line = call.start_position().row + 1;
+                    if earliest_external_call_line.is_none_or(|prev| line < prev) {
+                        earliest_external_call_line = Some(line);
+                    }
                 }
             }
-        }
 
-        // Report if we found state change after external call
-        if let (Some(call_line), Some(change_line)) = (external_call_line, state_change_line) {
-            if change_line > call_line {
-                // Adjust confidence based on visibility
+            let call_line = match earliest_external_call_line {
+                Some(l) => l,
+                None => continue,
+            };
+
+            // Look for state writes AFTER the external call
+            let assignments = find_nodes_of_kind(&body, "assignment_expression");
+            let augmented = find_nodes_of_kind(&body, "augmented_assignment_expression");
+
+            let state_change_line = assignments
+                .iter()
+                .chain(augmented.iter())
+                .filter(|node| is_state_write(node))
+                .map(|node| node.start_position().row + 1)
+                .find(|&line| line > call_line);
+
+            if let Some(change_line) = state_change_line {
                 let base_confidence = Confidence::High;
-                let adjusted_confidence =
-                    visibility_adjusted_confidence(base_confidence, visibility);
+                let adjusted = visibility_adjusted_confidence(base_confidence, visibility);
 
                 let visibility_note = if !visibility.is_externally_callable() {
                     format!(" ({} function - lower risk)", visibility.as_str())
@@ -77,31 +78,18 @@ fn find_reentrancy(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Fi
                     String::new()
                 };
 
-                findings.push(Finding {
-                    id: String::new(),
-                    detector_id: "reentrancy".to_string(),
-                    severity: Severity::High,
-                    confidence: adjusted_confidence,
-                    line: call_line,
-                    vulnerability_type: "Reentrancy".to_string(),
-                    message: format!(
+                findings.push(Finding::from_detector(
+                    self,
+                    call_line,
+                    adjusted,
+                    "Reentrancy",
+                    format!(
                         "External call at line {}, state change at line {}{}",
                         call_line, change_line, visibility_note
                     ),
-                    suggestion:
-                        "Move state changes before external call, or add nonReentrant modifier"
-                            .to_string(),
-                    remediation: None,
-                    owasp_category: Some("SC02:2025 - Reentrancy Attacks".to_string()),
-                    file: None,
-                });
+                    "Move state changes before external call, or add nonReentrant modifier",
+                ));
             }
         }
-    }
-
-    // Recurse into children
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_reentrancy(&child, source, findings);
     }
 }

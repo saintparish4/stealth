@@ -189,14 +189,18 @@ mod tests {
     fn parse_ignores_typed_suppression() {
         let src = "// stealth-ignore: reentrancy\nuint x = 1;";
         let ignores = parse_stealth_ignores(src);
-        assert!(ignores.iter().any(|(line, t)| *line == 2 && t.as_deref() == Some("reentrancy")));
+        assert!(ignores
+            .iter()
+            .any(|(line, t)| *line == 2 && t.as_deref() == Some("reentrancy")));
     }
 
     #[test]
     fn parse_ignores_with_target_line() {
         let src = "// stealth-ignore: tx-origin L5";
         let ignores = parse_stealth_ignores(src);
-        assert!(ignores.iter().any(|(line, t)| *line == 5 && t.as_deref() == Some("tx origin")));
+        assert!(ignores
+            .iter()
+            .any(|(line, t)| *line == 5 && t.as_deref() == Some("tx origin")));
     }
 
     #[test]
@@ -258,7 +262,11 @@ mod tests {
 
     #[test]
     fn suppressed_by_detector_id_unchecked_calls() {
-        let finding = make_finding("unchecked-calls", "Unchecked External Call Return Values", 3);
+        let finding = make_finding(
+            "unchecked-calls",
+            "Unchecked External Call Return Values",
+            3,
+        );
         let ignores = vec![(3, Some("unchecked calls".to_string()))];
         assert!(is_suppressed(&ignores, &finding));
     }
@@ -286,7 +294,10 @@ mod tests {
         let source = "some code\n// stealth-ignore: tx-origin\nrequire(tx.origin == msg.sender);";
         let findings = vec![make_finding("tx-origin", "tx.origin Authentication", 3)];
         let filtered = filter_findings_by_inline_ignores(findings, source);
-        assert!(filtered.is_empty(), "finding should be suppressed by detector_id");
+        assert!(
+            filtered.is_empty(),
+            "finding should be suppressed by detector_id"
+        );
     }
 
     #[test]
@@ -294,7 +305,10 @@ mod tests {
         let source = "some code\n// stealth-ignore: Reentrancy\nexternal_call();";
         let findings = vec![make_finding("reentrancy", "Reentrancy", 3)];
         let filtered = filter_findings_by_inline_ignores(findings, source);
-        assert!(filtered.is_empty(), "finding should be suppressed by vulnerability_type");
+        assert!(
+            filtered.is_empty(),
+            "finding should be suppressed by vulnerability_type"
+        );
     }
 
     #[test]

@@ -102,8 +102,11 @@ pub fn function_visibility(func_node: &Node, source: &str) -> Visibility {
     for i in 0..child_count(func_node) {
         if let Some(child) = func_node.child(i) {
             let kind = child.kind();
-            if kind == "visibility" || kind == "public" || kind == "external"
-                || kind == "internal" || kind == "private"
+            if kind == "visibility"
+                || kind == "public"
+                || kind == "external"
+                || kind == "internal"
+                || kind == "private"
             {
                 let text = node_text(&child, source);
                 return match text {
@@ -172,16 +175,18 @@ pub fn has_reentrancy_guard(func_node: &Node, source: &str) -> bool {
 }
 
 /// Check for common access-control modifiers on a function node.
+///
+/// Matches any modifier starting with `"only"` (e.g. `onlyOwner`, `onlyAdmin`,
+/// `onlyMinter`), plus `"whenNotPaused"` and `"initializer"`.
 pub fn has_access_control_modifier(func_node: &Node, source: &str) -> bool {
-    has_modifier(
-        func_node,
-        source,
-        &["onlyOwner", "onlyAdmin", "onlyRole", "onlyAuthorized"],
-    )
+    let mods = function_modifiers(func_node, source);
+    mods.iter()
+        .any(|m| m.starts_with("only") || *m == "whenNotPaused" || *m == "initializer")
 }
 
-/// Check if a function body contains a `require(msg.sender == ...)` pattern
-/// by walking the AST for call_expression nodes containing msg.sender comparisons.
+/// Check if a function body contains a `require(msg.sender == ...)` pattern,
+/// a `hasRole(..., msg.sender)` call, or an `if (msg.sender != ...) revert`
+/// pattern by walking the AST.
 pub fn has_require_sender_check(func_node: &Node, source: &str) -> bool {
     let body = match func_body(func_node) {
         Some(b) => b,
@@ -193,6 +198,10 @@ pub fn has_require_sender_check(func_node: &Node, source: &str) -> bool {
         if (text.starts_with("require") || text.starts_with("revert"))
             && text.contains("msg.sender")
         {
+            return true;
+        }
+        // hasRole(..., msg.sender) or similar role-check pattern
+        if text.contains("hasRole") && text.contains("msg.sender") {
             return true;
         }
     }
@@ -230,7 +239,9 @@ pub fn func_body<'a>(func_node: &Node<'a>) -> Option<Node<'a>> {
         for i in 0..child_count(func_node) {
             if let Some(child) = func_node.child(i) {
                 let k = child.kind();
-                if k == "function_body" || k == "block" || k == "statement_block"
+                if k == "function_body"
+                    || k == "block"
+                    || k == "statement_block"
                     || k == "block_statement"
                 {
                     return Some(child);
@@ -247,11 +258,11 @@ pub fn func_body<'a>(func_node: &Node<'a>) -> Option<Node<'a>> {
 
 /// Describes the target of a function call.
 #[derive(Debug, Clone, PartialEq)]
-pub enum CallTarget {
+pub enum CallTarget<'a> {
     /// `addr.call{...}(...)` / `addr.transfer(...)` / `addr.delegatecall(...)`
-    MemberCall { object: String, method: String },
+    MemberCall { object: &'a str, method: &'a str },
     /// `require(...)`, `keccak256(...)`, etc.
-    FreeFunction { name: String },
+    FreeFunction { name: &'a str },
 }
 
 /// Drill through tree-sitter wrapper nodes (`expression`, `struct_expression`)
@@ -283,7 +294,7 @@ fn unwrap_callee<'a>(node: Node<'a>) -> Node<'a> {
 }
 
 /// Resolve the target of a `call_expression` (or `function_call`) node.
-pub fn get_call_target(node: &Node, source: &str) -> Option<CallTarget> {
+pub fn get_call_target<'a>(node: &Node<'a>, source: &'a str) -> Option<CallTarget<'a>> {
     let kind = node.kind();
     if kind != "call_expression" && kind != "function_call" {
         return None;
@@ -293,11 +304,11 @@ pub fn get_call_target(node: &Node, source: &str) -> Option<CallTarget> {
     if callee.kind() == "member_expression" || callee.kind() == "member_access_expression" {
         let (obj, method) = get_member_access(&callee, source)?;
         Some(CallTarget::MemberCall {
-            object: obj.to_string(),
-            method: method.to_string(),
+            object: obj,
+            method,
         })
     } else {
-        let name = node_text(&callee, source).to_string();
+        let name = node_text(&callee, source);
         Some(CallTarget::FreeFunction { name })
     }
 }
@@ -306,7 +317,7 @@ pub fn get_call_target(node: &Node, source: &str) -> Option<CallTarget> {
 /// `.delegatecall`, `.staticcall`).
 pub fn is_external_call(node: &Node, source: &str) -> bool {
     matches!(get_call_target(node, source), Some(CallTarget::MemberCall { method, .. })
-        if matches!(method.as_str(), "call" | "transfer" | "send" | "delegatecall" | "staticcall"))
+        if matches!(method, "call" | "transfer" | "send" | "delegatecall" | "staticcall"))
 }
 
 /// Check whether a node is a state write (`assignment_expression` or
@@ -333,14 +344,13 @@ pub fn has_solidity_gte_0_8(root: &Node, source: &str) -> bool {
     let pragmas = find_nodes_of_kind(root, "pragma_directive");
     for pragma in &pragmas {
         let text = node_text(pragma, source);
-        if text.contains("solidity") {
-            if text.contains("^0.8")
+        if text.contains("solidity")
+            && (text.contains("^0.8")
                 || text.contains(">=0.8")
                 || text.contains(">0.7")
-                || text.contains("0.8.")
-            {
-                return true;
-            }
+                || text.contains("0.8."))
+        {
+            return true;
         }
     }
     false
@@ -354,7 +364,7 @@ pub fn has_solidity_gte_0_8(root: &Node, source: &str) -> bool {
 pub fn is_proxy_contract(root: &Node, source: &str) -> bool {
     let contracts = find_nodes_of_kind(root, "contract_declaration");
     for c in &contracts {
-        let text = node_text(&c, source);
+        let text = node_text(c, source);
         if text.contains("Upgradeable")
             || text.contains("Proxy")
             || text.contains("UUPS")
@@ -474,7 +484,10 @@ mod tests {
         let tree = parse(src);
         let members = find_nodes_of_kind(&tree.root_node(), "member_expression")
             .into_iter()
-            .chain(find_nodes_of_kind(&tree.root_node(), "member_access_expression"))
+            .chain(find_nodes_of_kind(
+                &tree.root_node(),
+                "member_access_expression",
+            ))
             .collect::<Vec<_>>();
         let found = members.iter().any(|m| {
             if let Some((obj, member)) = get_member_access(m, src) {
@@ -500,11 +513,14 @@ mod tests {
         let tree = parse(src);
         let members = find_nodes_of_kind(&tree.root_node(), "member_expression")
             .into_iter()
-            .chain(find_nodes_of_kind(&tree.root_node(), "member_access_expression"))
+            .chain(find_nodes_of_kind(
+                &tree.root_node(),
+                "member_access_expression",
+            ))
             .collect::<Vec<_>>();
-        let found = members.iter().any(|m| {
-            matches!(get_member_access(m, src), Some(("block", "timestamp")))
-        });
+        let found = members
+            .iter()
+            .any(|m| matches!(get_member_access(m, src), Some(("block", "timestamp"))));
         assert!(found, "expected to find block.timestamp member access");
     }
 
@@ -633,9 +649,10 @@ mod tests {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier onlyOwner() { _; }\n  function f() public onlyOwner {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         let mods = function_modifiers(target, src);
         assert!(mods.contains(&"onlyOwner"), "got: {:?}", mods);
     }
@@ -654,9 +671,10 @@ mod tests {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier nonReentrant() { _; }\n  function f() public nonReentrant {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         assert!(has_modifier(target, src, &["nonReentrant"]));
     }
 
@@ -685,9 +703,10 @@ mod tests {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier nonReentrant() { _; }\n  function f() external nonReentrant {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         assert!(has_reentrancy_guard(target, src));
     }
 
@@ -704,9 +723,10 @@ mod tests {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier lock() { _; }\n  function f() external lock {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         assert!(has_reentrancy_guard(target, src));
     }
 
@@ -719,9 +739,10 @@ mod tests {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier onlyOwner() { _; }\n  function f() external onlyOwner {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         assert!(has_access_control_modifier(target, src));
     }
 
@@ -738,9 +759,10 @@ mod tests {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier onlyAdmin() { _; }\n  function f() external onlyAdmin {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         assert!(has_access_control_modifier(target, src));
     }
 
@@ -764,7 +786,8 @@ contract A {
 
     #[test]
     fn has_require_sender_check_negative() {
-        let src = "pragma solidity ^0.8.0;\ncontract A {\n  function f() public { uint256 x = 1; }\n}";
+        let src =
+            "pragma solidity ^0.8.0;\ncontract A {\n  function f() public { uint256 x = 1; }\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
         assert!(!has_require_sender_check(&funcs[0], src));
@@ -793,9 +816,10 @@ contract A {
         let src = "pragma solidity ^0.8.0;\ncontract A {\n  modifier onlyOwner() { _; }\n  function f() external onlyOwner {}\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         assert!(has_access_control(target, src));
     }
 
@@ -827,7 +851,8 @@ contract A {
 
     #[test]
     fn func_body_returns_body() {
-        let src = "pragma solidity ^0.8.0;\ncontract A {\n  function f() public { uint256 x = 1; }\n}";
+        let src =
+            "pragma solidity ^0.8.0;\ncontract A {\n  function f() public { uint256 x = 1; }\n}";
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
         let body = func_body(&funcs[0]);
@@ -867,13 +892,17 @@ contract A {
 }"#;
         let tree = parse(src);
         let calls = find_nodes_of_kind(&tree.root_node(), "call_expression");
-        let member_calls: Vec<_> = calls.iter().filter_map(|c| {
-            match get_call_target(c, src) {
+        let member_calls: Vec<_> = calls
+            .iter()
+            .filter_map(|c| match get_call_target(c, src) {
                 Some(CallTarget::MemberCall { .. }) => Some(get_call_target(c, src).unwrap()),
                 _ => None,
-            }
-        }).collect();
-        assert!(!member_calls.is_empty(), "expected at least one member call");
+            })
+            .collect();
+        assert!(
+            !member_calls.is_empty(),
+            "expected at least one member call"
+        );
     }
 
     #[test]
@@ -1103,9 +1132,10 @@ contract A {
 }"#;
         let tree = parse(src);
         let funcs = find_nodes_of_kind(&tree.root_node(), "function_definition");
-        let target = funcs.iter().find(|f| {
-            function_name(f, src) == Some("f")
-        }).expect("expected function f");
+        let target = funcs
+            .iter()
+            .find(|f| function_name(f, src) == Some("f"))
+            .expect("expected function f");
         let mods = function_modifiers(target, src);
         assert!(mods.contains(&"onlyOwner"), "got: {:?}", mods);
         assert!(mods.contains(&"nonReentrant"), "got: {:?}", mods);

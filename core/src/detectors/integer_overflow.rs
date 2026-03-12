@@ -2,102 +2,142 @@
 //!
 //! For Solidity >=0.8: flags arithmetic inside `unchecked { }` blocks.
 //! For Solidity <0.8: flags raw arithmetic on uint types without SafeMath.
+//! Uses AST pragma nodes for version detection and function-level analysis.
 
+use crate::ast_utils::{find_nodes_of_kind, func_body, has_solidity_gte_0_8, node_text};
+use crate::detector_trait::{AnalysisContext, Detector};
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_integer_overflow(
-    tree: &tree_sitter::Tree,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
-    // Check Solidity version - 0.8+ has built-in overflow checks
-    let has_safe_version = source.contains("pragma solidity ^0.8")
-        || source.contains("pragma solidity >=0.8")
-        || source.contains("pragma solidity 0.8");
+pub struct IntegerOverflowDetector;
 
-    if has_safe_version {
-        // Check for unchecked blocks which bypass safety
-        find_unchecked_math(&tree.root_node(), source, findings);
-    } else {
-        // Pre-0.8: check for unsafe math operations
-        find_unsafe_math(&tree.root_node(), source, findings);
+impl Detector for IntegerOverflowDetector {
+    fn id(&self) -> &'static str {
+        "integer-overflow"
     }
-}
+    fn name(&self) -> &'static str {
+        "Integer Overflow / Underflow"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn owasp_category(&self) -> Option<&'static str> {
+        Some("SC03:2025 - Integer Overflow and Underflow")
+    }
+    fn run(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        let root = ctx.tree.root_node();
+        let has_safe_version = has_solidity_gte_0_8(&root, ctx.source);
 
-fn find_unchecked_math(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
-    let text = &source[node.start_byte()..node.end_byte()];
+        // Unchecked blocks bypass safety regardless of Solidity version
+        self.find_unchecked_math(ctx, findings);
 
-    if text.contains("unchecked {") || text.contains("unchecked{") {
-        // Find arithmetic in unchecked blocks
-        let has_arithmetic = text.contains(" + ")
-            || text.contains(" - ")
-            || text.contains(" * ")
-            || text.contains("++")
-            || text.contains("--");
-
-        if has_arithmetic {
-            findings.push(Finding {
-                id: String::new(),
-                detector_id: "integer-overflow".to_string(),
-                severity: Severity::Medium,
-                confidence: Confidence::Medium,
-                line: node.start_position().row + 1,
-                vulnerability_type: "Unchecked Arithmetic".to_string(),
-                message: "Arithmetic in unchecked block bypasses overflow protection".to_string(),
-                suggestion: "Ensure overflow/underflow is impossible or add manual checks"
-                    .to_string(),
-                remediation: None,
-                owasp_category: Some("SC03:2025 - Integer Overflow and Underflow".to_string()),
-                file: None,
-            });
+        if !has_safe_version {
+            self.find_unsafe_math(ctx, findings);
         }
     }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_unchecked_math(&child, source, findings);
-    }
 }
 
-fn find_unsafe_math(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
-    if node.kind() == "function_definition" {
-        let func_text = &source[node.start_byte()..node.end_byte()];
+impl IntegerOverflowDetector {
+    fn find_unchecked_math(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        // Look for unchecked_block nodes in the AST
+        let unchecked_blocks = find_nodes_of_kind(&ctx.tree.root_node(), "unchecked_block");
 
-        // Check for SafeMath usage
-        let uses_safemath = func_text.contains(".add(")
-            || func_text.contains(".sub(")
-            || func_text.contains(".mul(")
-            || func_text.contains(".div(");
+        for block in &unchecked_blocks {
+            let text = node_text(block, ctx.source);
+            let has_arithmetic = text.contains(" + ")
+                || text.contains(" - ")
+                || text.contains(" * ")
+                || text.contains("++")
+                || text.contains("--");
 
-        if !uses_safemath {
-            // Look for raw arithmetic on uint types
-            let has_unsafe_add = func_text.contains(" += ")
-                || (func_text.contains(" + ") && func_text.contains("uint"));
-            let has_unsafe_sub = func_text.contains(" -= ")
-                || (func_text.contains(" - ") && func_text.contains("uint"));
-            let has_unsafe_mul = func_text.contains(" *= ")
-                || (func_text.contains(" * ") && func_text.contains("uint"));
-
-            if has_unsafe_add || has_unsafe_sub || has_unsafe_mul {
+            if has_arithmetic {
                 findings.push(Finding {
                     id: String::new(),
-                    detector_id: "integer-overflow".to_string(),
-                    severity: Severity::High,
+                    detector_id: self.id().to_string(),
+                    severity: Severity::Medium,
                     confidence: Confidence::Medium,
-                    line: node.start_position().row + 1,
-                    vulnerability_type: "Integer Overflow/Underflow".to_string(),
-                    message: "Arithmetic operation without SafeMath in Solidity <0.8".to_string(),
-                    suggestion: "Use SafeMath library or upgrade to Solidity >=0.8.0".to_string(),
+                    line: block.start_position().row + 1,
+                    vulnerability_type: "Unchecked Arithmetic".to_string(),
+                    message: "Arithmetic in unchecked block bypasses overflow protection"
+                        .to_string(),
+                    suggestion: "Ensure overflow/underflow is impossible or add manual checks"
+                        .to_string(),
                     remediation: None,
-                    owasp_category: Some("SC03:2025 - Integer Overflow and Underflow".to_string()),
+                    owasp_category: self.owasp_category().map(|s| s.to_string()),
                     file: None,
                 });
             }
         }
+
+        // Fallback: look for `unchecked {` in function bodies for grammars that
+        // don't produce a dedicated unchecked_block node.
+        if unchecked_blocks.is_empty() {
+            for func in &ctx.functions {
+                let body = match func_body(func) {
+                    Some(b) => b,
+                    None => continue,
+                };
+                let body_text = node_text(&body, ctx.source);
+                if (body_text.contains("unchecked {") || body_text.contains("unchecked{"))
+                    && (body_text.contains(" + ")
+                        || body_text.contains(" - ")
+                        || body_text.contains(" * ")
+                        || body_text.contains("++")
+                        || body_text.contains("--"))
+                {
+                    findings.push(Finding {
+                        id: String::new(),
+                        detector_id: self.id().to_string(),
+                        severity: Severity::Medium,
+                        confidence: Confidence::Medium,
+                        line: func.start_position().row + 1,
+                        vulnerability_type: "Unchecked Arithmetic".to_string(),
+                        message: "Arithmetic in unchecked block bypasses overflow protection"
+                            .to_string(),
+                        suggestion: "Ensure overflow/underflow is impossible or add manual checks"
+                            .to_string(),
+                        remediation: None,
+                        owasp_category: self.owasp_category().map(|s| s.to_string()),
+                        file: None,
+                    });
+                }
+            }
+        }
     }
 
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_unsafe_math(&child, source, findings);
+    fn find_unsafe_math(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        for func in &ctx.functions {
+            let body = match func_body(func) {
+                Some(b) => b,
+                None => continue,
+            };
+            let body_text = node_text(&body, ctx.source);
+
+            let uses_safemath = body_text.contains(".add(")
+                || body_text.contains(".sub(")
+                || body_text.contains(".mul(")
+                || body_text.contains(".div(");
+
+            if uses_safemath {
+                continue;
+            }
+
+            let has_unsafe_add = body_text.contains(" += ")
+                || (body_text.contains(" + ") && body_text.contains("uint"));
+            let has_unsafe_sub = body_text.contains(" -= ")
+                || (body_text.contains(" - ") && body_text.contains("uint"));
+            let has_unsafe_mul = body_text.contains(" *= ")
+                || (body_text.contains(" * ") && body_text.contains("uint"));
+
+            if has_unsafe_add || has_unsafe_sub || has_unsafe_mul {
+                findings.push(Finding::from_detector(
+                    self,
+                    func.start_position().row + 1,
+                    Confidence::Medium,
+                    "Integer Overflow/Underflow",
+                    "Arithmetic operation without SafeMath in Solidity <0.8".to_string(),
+                    "Use SafeMath library or upgrade to Solidity >=0.8.0",
+                ));
+            }
+        }
     }
 }

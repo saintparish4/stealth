@@ -11,7 +11,8 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::detectors::run_all_detectors;
+use crate::detector_trait::AnalysisContext;
+use crate::detectors::build_registry;
 use crate::suppression::filter_findings_by_inline_ignores;
 use crate::types::Finding;
 
@@ -52,8 +53,10 @@ pub fn scan_source(source: &str) -> String {
         None => return "[]".to_string(),
     };
 
+    let registry = build_registry();
+    let ctx = AnalysisContext::new(&tree, source);
     let mut findings: Vec<Finding> = Vec::new();
-    run_all_detectors(&tree, source, &mut findings);
+    registry.run_all(&ctx, &mut findings);
 
     // Apply inline suppressions (// stealth-ignore: ...)
     let findings = filter_findings_by_inline_ignores(findings, source);

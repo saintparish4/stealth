@@ -3,7 +3,7 @@
 //! On first run: `cargo test` creates snapshot files in tests/snapshots/.
 //! Review with: `cargo insta review`
 
-use stealth_scanner::detectors::run_all_detectors;
+use stealth_scanner::detectors::build_registry;
 use stealth_scanner::output::{format_json, format_sarif};
 use stealth_scanner::scan::{calculate_statistics, new_solidity_parser, scan_file_with};
 
@@ -14,8 +14,9 @@ fn scan_test_contract() -> (Vec<stealth_scanner::Finding>, stealth_scanner::Stat
         "../contracts/comprehensive-vulnerabilities.sol"
     };
 
+    let registry = build_registry();
     let mut parser = new_solidity_parser().expect("parser");
-    let outcome = scan_file_with(path, run_all_detectors, &mut parser);
+    let outcome = scan_file_with(path, &registry, &mut parser);
     let stats = calculate_statistics(&outcome.findings);
     (outcome.findings, stats)
 }

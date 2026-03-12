@@ -8,8 +8,9 @@
 //! [`AnalysisContext`] is the read-only bundle passed to each [`Detector::run`] call.
 //! Phase S3 will extend it with an optional control flow graph.
 
-use crate::types::{Finding, Severity};
-use tree_sitter::Tree;
+use crate::ast_utils::find_nodes_of_kind;
+use crate::types::{Confidence, Finding, Severity};
+use tree_sitter::{Node, Tree};
 
 // ---------------------------------------------------------------------------
 // AnalysisContext
@@ -27,15 +28,22 @@ pub struct AnalysisContext<'a> {
     pub source: &'a str,
     /// Path to the file being analysed, if known.
     pub file_path: Option<&'a str>,
+    /// Pre-computed `function_definition` nodes for efficient iteration.
+    pub functions: Vec<Node<'a>>,
 }
 
 impl<'a> AnalysisContext<'a> {
     /// Construct a context from the minimal required fields.
+    ///
+    /// Pre-computes the list of `function_definition` nodes so detectors can
+    /// iterate `ctx.functions` instead of traversing the full tree.
     pub fn new(tree: &'a Tree, source: &'a str) -> Self {
+        let functions = find_nodes_of_kind(&tree.root_node(), "function_definition");
         Self {
             tree,
             source,
             file_path: None,
+            functions,
         }
     }
 
@@ -43,6 +51,37 @@ impl<'a> AnalysisContext<'a> {
     pub fn with_file_path(mut self, path: &'a str) -> Self {
         self.file_path = Some(path);
         self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Finding builder (avoids circular dep between types.rs ↔ detector_trait.rs)
+// ---------------------------------------------------------------------------
+
+impl Finding {
+    /// Construct a `Finding` that derives `detector_id`, `severity`, and
+    /// `owasp_category` from the detector that produced it.
+    pub fn from_detector(
+        detector: &dyn Detector,
+        line: usize,
+        confidence: Confidence,
+        vulnerability_type: &str,
+        message: String,
+        suggestion: &str,
+    ) -> Self {
+        Self {
+            id: String::new(),
+            detector_id: detector.id().to_string(),
+            severity: detector.severity(),
+            confidence,
+            line,
+            vulnerability_type: vulnerability_type.to_string(),
+            message,
+            suggestion: suggestion.to_string(),
+            remediation: None,
+            owasp_category: detector.owasp_category().map(|s| s.to_string()),
+            file: None,
+        }
     }
 }
 

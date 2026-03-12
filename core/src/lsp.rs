@@ -8,7 +8,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::detectors::run_all_detectors;
+use crate::detector_trait::AnalysisContext;
+use crate::detectors::build_registry;
 use crate::suppression::filter_findings_by_inline_ignores;
 use crate::types::{Finding, Severity};
 
@@ -113,8 +114,10 @@ fn scan_to_diagnostics(source: &str) -> Vec<Diagnostic> {
         None => return vec![],
     };
 
+    let registry = build_registry();
+    let ctx = AnalysisContext::new(&tree, source);
     let mut findings: Vec<Finding> = Vec::new();
-    run_all_detectors(&tree, source, &mut findings);
+    registry.run_all(&ctx, &mut findings);
     let findings = filter_findings_by_inline_ignores(findings, source);
 
     findings

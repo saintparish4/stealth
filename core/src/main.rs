@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use std::path::Path;
-use stealth_scanner::detectors::run_all_detectors;
+use stealth_scanner::detectors::build_registry;
 use stealth_scanner::scan::{exit_code_for_stats, new_solidity_parser};
 use stealth_scanner::*;
 
@@ -45,10 +45,11 @@ fn main() {
                 }
             };
 
+            let registry = build_registry();
             let outcome = if Path::new(&path).is_dir() {
-                scan_directory_with(&path, recursive, run_all_detectors, &mut parser)
+                scan_directory_with(&path, recursive, &registry, &mut parser)
             } else {
-                scan_file_with(&path, run_all_detectors, &mut parser)
+                scan_file_with(&path, &registry, &mut parser)
             };
 
             for err in &outcome.errors {
@@ -82,6 +83,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use stealth_scanner::detector_trait::{AnalysisContext, Detector};
     use stealth_scanner::detectors::*;
     use stealth_scanner::scan::new_solidity_parser;
     use stealth_scanner::*;
@@ -94,7 +96,14 @@ mod tests {
         parser.parse(source, None).expect("parse")
     }
 
-    /// Helper: build a Finding with the new required fields using sensible defaults.
+    fn run_detector(detector: &dyn Detector, source: &str) -> Vec<Finding> {
+        let tree = parse_solidity(source);
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        detector.run(&ctx, &mut findings);
+        findings
+    }
+
     fn test_finding(
         severity: Severity,
         confidence: Confidence,
@@ -203,9 +212,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_reentrancy(&tree, source, &mut findings);
+        let findings = run_detector(&ReentrancyDetector, source);
         assert!(
             !findings.is_empty(),
             "reentrancy detector should find state change after call"
@@ -228,9 +235,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_tx_origin(&tree, source, &mut findings);
+        let findings = run_detector(&TxOriginDetector, source);
         assert!(
             !findings.is_empty(),
             "tx.origin detector should find auth use"
@@ -250,9 +255,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_timestamp_dependence(&tree, source, &mut findings);
+        let findings = run_detector(&TimestampDetector, source);
         assert!(
             !findings.is_empty(),
             "timestamp detector should find modulo use"
@@ -270,9 +273,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_unsafe_random(&tree, source, &mut findings);
+        let findings = run_detector(&UnsafeRandomDetector, source);
         assert!(
             !findings.is_empty(),
             "unsafe random detector should find block-based randomness"
@@ -291,9 +292,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_access_control(&tree, source, &mut findings);
+        let findings = run_detector(&AccessControlDetector, source);
         assert!(
             !findings.is_empty(),
             "access control detector should find withdraw with arbitrary recipient"
@@ -315,9 +314,7 @@ contract C {
 }
 interface IERC20 { function transfer(address to, uint256 amount) external returns (bool); }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_unchecked_erc20(&tree, source, &mut findings);
+        let findings = run_detector(&UncheckedErc20Detector, source);
         assert!(
             !findings.is_empty(),
             "unchecked ERC20 detector should find transfer without check"
@@ -340,9 +337,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_dangerous_delegatecall(&tree, source, &mut findings);
+        let findings = run_detector(&DangerousDelegatecallDetector, source);
         assert!(
             !findings.is_empty(),
             "delegatecall detector should find user-controlled target"
@@ -360,9 +355,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_unchecked_calls(&tree, source, &mut findings);
+        let findings = run_detector(&UncheckedCallsDetector, source);
         assert!(
             !findings.is_empty(),
             "unchecked call detector should find .call without return check"
@@ -383,14 +376,17 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_integer_overflow(&tree, source, &mut findings);
+        let findings = run_detector(&IntegerOverflowDetector, source);
         assert!(
             !findings.is_empty(),
             "integer overflow detector should find unchecked arithmetic in <0.8 or unchecked block"
         );
-        assert_eq!(findings[0].vulnerability_type, "Integer Overflow/Underflow");
+        let vt = &findings[0].vulnerability_type;
+        assert!(
+            vt == "Integer Overflow/Underflow" || vt == "Unchecked Arithmetic",
+            "expected overflow-related finding, got: {}",
+            vt
+        );
     }
 
     #[test]
@@ -407,16 +403,14 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_access_control(&tree, source, &mut findings);
+        let findings = run_detector(&AccessControlDetector, source);
         assert!(
             findings.is_empty(),
             "access control should not flag self-service withdraw (operates on msg.sender only)"
         );
     }
 
-    // ========== FP-absence tests (Decision 9A) ==========
+    // ========== FP-absence tests ==========
 
     #[test]
     fn fp_absence_reentrancy_checks_effects_interactions() {
@@ -432,9 +426,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_reentrancy(&tree, source, &mut findings);
+        let findings = run_detector(&ReentrancyDetector, source);
         assert!(
             findings.is_empty(),
             "CEI pattern should not trigger reentrancy"
@@ -452,9 +444,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_tx_origin(&tree, source, &mut findings);
+        let findings = run_detector(&TxOriginDetector, source);
         assert!(
             findings.is_empty(),
             "tx.origin used for logging (not auth) should not trigger"
@@ -472,9 +462,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_timestamp_dependence(&tree, source, &mut findings);
+        let findings = run_detector(&TimestampDetector, source);
         assert!(
             findings.is_empty(),
             ">= comparison with block.timestamp should not trigger"
@@ -491,9 +479,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_unchecked_erc20(&tree, source, &mut findings);
+        let findings = run_detector(&UncheckedErc20Detector, source);
         assert!(
             findings.is_empty(),
             "safeTransfer should not trigger unchecked ERC20"
@@ -511,9 +497,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_flash_loan_vulnerability(&tree, source, &mut findings);
+        let findings = run_detector(&FlashLoanDetector, source);
         let callback_findings: Vec<_> = findings
             .iter()
             .filter(|f| f.vulnerability_type == "Unvalidated Callback")
@@ -536,9 +520,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_dangerous_delegatecall(&tree, source, &mut findings);
+        let findings = run_detector(&DangerousDelegatecallDetector, source);
         assert!(
             findings.is_empty(),
             "delegatecall with access control should not trigger"
@@ -556,9 +538,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_unchecked_calls(&tree, source, &mut findings);
+        let findings = run_detector(&UncheckedCallsDetector, source);
         assert!(
             findings.is_empty(),
             "checked call should not trigger unchecked call detector"
@@ -575,9 +555,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_integer_overflow(&tree, source, &mut findings);
+        let findings = run_detector(&IntegerOverflowDetector, source);
         assert!(
             findings.is_empty(),
             "Solidity >=0.8 safe arithmetic should not trigger"
@@ -597,9 +575,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_access_control(&tree, source, &mut findings);
+        let findings = run_detector(&AccessControlDetector, source);
         assert!(
             findings.is_empty(),
             "self-service claim should not trigger access control"
@@ -616,9 +592,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_unsafe_random(&tree, source, &mut findings);
+        let findings = run_detector(&UnsafeRandomDetector, source);
         assert!(
             findings.is_empty(),
             "VRF pattern should not trigger unsafe randomness"
@@ -640,9 +614,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_dos_loops(&tree, source, &mut findings);
+        let findings = run_detector(&DosLoopsDetector, source);
         let unbounded: Vec<_> = findings
             .iter()
             .filter(|f| f.vulnerability_type == "Unbounded Loop")
@@ -663,9 +635,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_front_running(&tree, source, &mut findings);
+        let findings = run_detector(&FrontRunningDetector, source);
         let slippage: Vec<_> = findings
             .iter()
             .filter(|f| f.vulnerability_type == "Missing Slippage Protection")
@@ -689,9 +659,7 @@ contract C is Initializable, Upgradeable {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_storage_collision(&tree, source, &mut findings);
+        let findings = run_detector(&StorageCollisionDetector, source);
         let gap: Vec<_> = findings
             .iter()
             .filter(|f| f.vulnerability_type == "Missing Storage Gap")
@@ -713,8 +681,9 @@ contract C is Initializable, Upgradeable {
         } else {
             path_alt
         };
+        let registry = build_registry();
         let mut parser = new_solidity_parser().expect("parser");
-        let outcome = scan_file_with(path_used, run_all_detectors, &mut parser);
+        let outcome = scan_file_with(path_used, &registry, &mut parser);
         assert!(
             outcome.errors.is_empty(),
             "scan should succeed without errors"
@@ -732,7 +701,6 @@ contract C is Initializable, Upgradeable {
         assert!(types.contains("Reentrancy"));
         assert!(types.contains("tx.origin Authentication"));
 
-        // Verify new fields are populated
         for f in findings {
             assert!(!f.detector_id.is_empty(), "detector_id should be set");
             assert!(!f.id.is_empty(), "id should be computed");
@@ -816,9 +784,7 @@ contract C {
     }
 }
 "#;
-        let tree = parse_solidity(source);
-        let mut findings = Vec::new();
-        detect_reentrancy(&tree, source, &mut findings);
+        let findings = run_detector(&ReentrancyDetector, source);
         assert!(
             !findings.is_empty(),
             "reentrancy should be found without filter"

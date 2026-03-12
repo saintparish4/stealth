@@ -1,4 +1,9 @@
-//! Shared helpers for detectors: self-service patterns, visibility, modifiers.
+//! Shared helpers for detectors: self-service patterns, visibility, normalization.
+//!
+//! Functions that duplicate `ast_utils` (e.g. `get_function_visibility`,
+//! `has_reentrancy_guard`, `has_access_control`, `has_modifier`,
+//! `extract_function_name`) have been removed. Use `ast_utils` for AST-based
+//! equivalents.
 
 use crate::types::{Confidence, Visibility};
 
@@ -62,7 +67,17 @@ pub fn should_skip_access_control_warning(func_name: &str, func_text: &str) -> b
     is_self_service_function_name(func_name) && is_self_service_pattern(func_text)
 }
 
-/// Extract function visibility from function text
+/// Get confidence level based on visibility (reentrancy)
+pub fn visibility_adjusted_confidence(base: Confidence, visibility: Visibility) -> Confidence {
+    match (base, visibility) {
+        (Confidence::High, Visibility::Private) => Confidence::Low,
+        (Confidence::High, Visibility::Internal) => Confidence::Medium,
+        (Confidence::Medium, Visibility::Private) => Confidence::Low,
+        _ => base,
+    }
+}
+
+/// Extract function visibility from function text (string-based, kept for legacy tests)
 pub fn get_function_visibility(func_text: &str) -> Visibility {
     let signature_end = func_text.find('{').unwrap_or(func_text.len());
     let signature = &func_text[..signature_end];
@@ -84,53 +99,6 @@ pub fn get_function_visibility(func_text: &str) -> Visibility {
     } else {
         Visibility::Public
     }
-}
-
-/// Get confidence level based on visibility (reentrancy)
-pub fn visibility_adjusted_confidence(base: Confidence, visibility: Visibility) -> Confidence {
-    match (base, visibility) {
-        (Confidence::High, Visibility::Private) => Confidence::Low,
-        (Confidence::High, Visibility::Internal) => Confidence::Medium,
-        (Confidence::Medium, Visibility::Private) => Confidence::Low,
-        _ => base,
-    }
-}
-
-/// Extract function name from function text
-pub fn extract_function_name(func_text: &str) -> String {
-    if let Some(start) = func_text.find("function ") {
-        let after_function = &func_text[start + 9..];
-        if let Some(end) = after_function.find('(') {
-            return after_function[..end].trim().to_string();
-        }
-    }
-    String::new()
-}
-
-/// Check if function has a modifier
-pub fn has_modifier(func_text: &str, modifiers: &[&str]) -> bool {
-    modifiers.iter().any(|m| func_text.contains(m))
-}
-
-/// Check for reentrancy guard modifiers
-pub fn has_reentrancy_guard(func_text: &str) -> bool {
-    has_modifier(
-        func_text,
-        &["nonReentrant", "noReentrant", "reentrancyGuard", "lock"],
-    )
-}
-
-/// Check if function has access control
-pub fn has_access_control(func_text: &str) -> bool {
-    let has_mod = func_text.contains("onlyOwner")
-        || func_text.contains("onlyAdmin")
-        || func_text.contains("onlyRole")
-        || func_text.contains("onlyAuthorized");
-    let has_require_sender = func_text.contains("require")
-        && (func_text.contains("msg.sender == owner")
-            || func_text.contains("msg.sender == admin")
-            || func_text.contains("_owner"));
-    has_mod || has_require_sender
 }
 
 /// Normalize vulnerability type for matching (suppression, baseline)

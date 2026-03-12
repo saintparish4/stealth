@@ -1,7 +1,8 @@
-//! Scanning: parse Solidity, run detectors (via callback), apply suppressions.
+//! Scanning: parse Solidity, run detectors via [`DetectorRegistry`], apply suppressions.
 //!
 //! Returns `ScanOutcome` with both findings and errors (partial success).
 
+use crate::detector_trait::{AnalysisContext, DetectorRegistry};
 use crate::suppression;
 use crate::types::{Finding, ScanError, ScanErrorKind, ScanOutcome, Severity, Statistics};
 use std::fs;
@@ -16,16 +17,13 @@ pub fn new_solidity_parser() -> Result<tree_sitter::Parser, String> {
     Ok(parser)
 }
 
-/// Scan a single file using the provided parser and detector function.
+/// Scan a single file using the provided registry.
 /// Returns `ScanOutcome` containing findings and any errors encountered.
-pub fn scan_file_with<F>(
+pub fn scan_file_with(
     file_path: &str,
-    run_detectors: F,
+    registry: &DetectorRegistry,
     parser: &mut tree_sitter::Parser,
-) -> ScanOutcome
-where
-    F: FnOnce(&tree_sitter::Tree, &str, &mut Vec<Finding>),
-{
+) -> ScanOutcome {
     let source = match fs::read_to_string(file_path) {
         Ok(c) => c,
         Err(e) => {
@@ -54,8 +52,9 @@ where
         }
     };
 
+    let ctx = AnalysisContext::new(&tree, &source).with_file_path(file_path);
     let mut findings = Vec::new();
-    run_detectors(&tree, &source, &mut findings);
+    registry.run_all(&ctx, &mut findings);
 
     for f in &mut findings {
         f.file = Some(file_path.to_string());
@@ -70,17 +69,14 @@ where
     }
 }
 
-/// Scan a directory (optionally recursive) using a shared parser.
+/// Scan a directory (optionally recursive) using a shared parser and registry.
 /// Returns aggregated `ScanOutcome` across all files.
-pub fn scan_directory_with<F>(
+pub fn scan_directory_with(
     dir_path: &str,
     recursive: bool,
-    run_detectors: F,
+    registry: &DetectorRegistry,
     parser: &mut tree_sitter::Parser,
-) -> ScanOutcome
-where
-    F: Fn(&tree_sitter::Tree, &str, &mut Vec<Finding>) + Copy,
-{
+) -> ScanOutcome {
     let walker = if recursive {
         WalkDir::new(dir_path)
     } else {
@@ -91,7 +87,7 @@ where
         let p = entry.path();
         if p.is_file() && p.extension().is_some_and(|e| e == "sol") {
             let path_str = p.to_str().unwrap_or_default();
-            let file_outcome = scan_file_with(path_str, run_detectors, parser);
+            let file_outcome = scan_file_with(path_str, registry, parser);
             outcome.findings.extend(file_outcome.findings);
             outcome.errors.extend(file_outcome.errors);
         }

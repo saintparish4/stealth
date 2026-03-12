@@ -1,59 +1,49 @@
-//! S1.5c: False-positive edge case tests.
+//! S1.5c → S2: False-positive edge case tests.
 //!
-//! These tests document false positives produced by the current string-matching
-//! detectors on safe code. Each test asserts the FP **exists** today.
-//!
-//! In Phase S2, after detectors are rewritten to use pure AST traversal, flip
-//! every `assert!(has_fp, ...)` to `assert!(!has_fp, ...)` (or change to
-//! `assert_eq!(findings.len(), 0)`).
+//! These tests verify that AST-based detectors do NOT fire on safe code where
+//! the old string-matching detectors would have produced false positives.
+//! After the S2 AST rewrite, all assertions confirm zero false positives.
 
+use stealth_scanner::detector_trait::{AnalysisContext, Detector};
 use stealth_scanner::detectors::{
-    detect_dangerous_delegatecall, detect_reentrancy, detect_timestamp_dependence, detect_tx_origin,
+    DangerousDelegatecallDetector, ReentrancyDetector, TimestampDetector, TxOriginDetector,
 };
 use stealth_scanner::scan::new_solidity_parser;
 use stealth_scanner::types::Finding;
 
 static FP_CONTRACT: &str = include_str!("../contracts/false-positive-edge-cases.sol");
 
-fn parse_and_detect<F>(source: &str, detect: F) -> Vec<Finding>
-where
-    F: FnOnce(&tree_sitter::Tree, &str, &mut Vec<Finding>),
-{
+fn run_detector(detector: &dyn Detector, source: &str) -> Vec<Finding> {
     let mut parser = new_solidity_parser().expect("parser");
     let tree = parser.parse(source, None).expect("parse");
+    let ctx = AnalysisContext::new(&tree, source);
     let mut findings = Vec::new();
-    detect(&tree, source, &mut findings);
+    detector.run(&ctx, &mut findings);
     findings
 }
 
 // -------------------------------------------------------------------
-// FP 1: `.call` in a comment triggers reentrancy detector
+// FP 1: `.call` in a comment must NOT trigger reentrancy detector
 // -------------------------------------------------------------------
 
 #[test]
-fn fp_call_in_comment_triggers_reentrancy() {
-    let findings = parse_and_detect(FP_CONTRACT, detect_reentrancy);
-    let has_fp = findings.iter().any(|f| {
-        f.detector_id == "reentrancy"
-            && f.vulnerability_type == "Reentrancy"
-    });
-    // S2: flip to assert!(!has_fp, ...) after AST rewrite
-    if has_fp {
-        eprintln!(
-            "[EXPECTED FP] reentrancy detector triggered by .call in a comment ({} findings)",
-            findings.len()
-        );
-    }
-    // Document: whether or not this FP fires today, the test records it.
-    // If has_fp is false, the detector already avoids this FP — great.
+fn fp_call_in_comment_does_not_trigger_reentrancy() {
+    let findings = run_detector(&ReentrancyDetector, FP_CONTRACT);
+    let has_fp = findings
+        .iter()
+        .any(|f| f.detector_id == "reentrancy" && f.vulnerability_type == "Reentrancy");
+    assert!(
+        !has_fp,
+        "AST-based reentrancy detector must not trigger on .call in a comment"
+    );
 }
 
 // -------------------------------------------------------------------
-// FP 2: `.call` in a string literal triggers reentrancy detector
+// FP 2: `.call` in a string literal must NOT trigger reentrancy
 // -------------------------------------------------------------------
 
 #[test]
-fn fp_call_in_string_literal_triggers_reentrancy() {
+fn fp_call_in_string_literal_does_not_trigger_reentrancy() {
     let source = r#"
 pragma solidity ^0.8.0;
 contract StringCallFP {
@@ -63,20 +53,20 @@ contract StringCallFP {
     }
 }
 "#;
-    let findings = parse_and_detect(source, detect_reentrancy);
+    let findings = run_detector(&ReentrancyDetector, source);
     let has_fp = findings.iter().any(|f| f.detector_id == "reentrancy");
-    // S2: flip to assert!(!has_fp)
-    if has_fp {
-        eprintln!("[EXPECTED FP] reentrancy detector triggered by .call in string literal");
-    }
+    assert!(
+        !has_fp,
+        "AST-based reentrancy detector must not trigger on .call in string literal"
+    );
 }
 
 // -------------------------------------------------------------------
-// FP 3: `tx.origin` in a comment triggers tx-origin detector
+// FP 3: `tx.origin` in a comment must NOT trigger tx-origin detector
 // -------------------------------------------------------------------
 
 #[test]
-fn fp_tx_origin_in_comment() {
+fn fp_tx_origin_in_comment_does_not_trigger() {
     let source = r#"
 pragma solidity ^0.8.0;
 contract CommentTxOriginFP {
@@ -86,23 +76,20 @@ contract CommentTxOriginFP {
     }
 }
 "#;
-    let findings = parse_and_detect(source, detect_tx_origin);
+    let findings = run_detector(&TxOriginDetector, source);
     let has_fp = findings.iter().any(|f| f.detector_id == "tx-origin");
-    // The current AST-aware tx_origin detector checks binary_expression nodes,
-    // so it may or may not fire on comments depending on how tree-sitter parses
-    // the comment. Document the result either way.
-    // S2: assert!(!has_fp) — AST detectors must never match inside comments
-    if has_fp {
-        eprintln!("[EXPECTED FP] tx-origin detector triggered by tx.origin in comment");
-    }
+    assert!(
+        !has_fp,
+        "AST-based tx-origin detector must not trigger on tx.origin in comment"
+    );
 }
 
 // -------------------------------------------------------------------
-// FP 4: `delegatecall` in an event name triggers delegatecall detector
+// FP 4: `delegatecall` in an event name must NOT trigger delegatecall
 // -------------------------------------------------------------------
 
 #[test]
-fn fp_delegatecall_in_event_name() {
+fn fp_delegatecall_in_event_name_does_not_trigger() {
     let source = r#"
 pragma solidity ^0.8.0;
 contract EventDelegatecallFP {
@@ -113,22 +100,22 @@ contract EventDelegatecallFP {
     }
 }
 "#;
-    let findings = parse_and_detect(source, detect_dangerous_delegatecall);
+    let findings = run_detector(&DangerousDelegatecallDetector, source);
     let has_fp = findings
         .iter()
         .any(|f| f.detector_id == "dangerous-delegatecall");
-    // S2: flip to assert!(!has_fp)
-    if has_fp {
-        eprintln!("[EXPECTED FP] delegatecall detector triggered by event name");
-    }
+    assert!(
+        !has_fp,
+        "AST-based delegatecall detector must not trigger on event name"
+    );
 }
 
 // -------------------------------------------------------------------
-// FP 5: `block.timestamp` in a string literal triggers timestamp detector
+// FP 5: `block.timestamp` in a string literal must NOT trigger
 // -------------------------------------------------------------------
 
 #[test]
-fn fp_block_timestamp_in_string_literal() {
+fn fp_block_timestamp_in_string_literal_does_not_trigger() {
     let source = r#"
 pragma solidity ^0.8.0;
 contract StringTimestampFP {
@@ -137,22 +124,22 @@ contract StringTimestampFP {
     }
 }
 "#;
-    let findings = parse_and_detect(source, detect_timestamp_dependence);
+    let findings = run_detector(&TimestampDetector, source);
     let has_fp = findings
         .iter()
         .any(|f| f.detector_id == "timestamp-dependence");
-    // S2: flip to assert!(!has_fp)
-    if has_fp {
-        eprintln!("[EXPECTED FP] timestamp detector triggered by block.timestamp in string literal");
-    }
+    assert!(
+        !has_fp,
+        "AST-based timestamp detector must not trigger on block.timestamp in string literal"
+    );
 }
 
 // -------------------------------------------------------------------
-// FP 6: `delegatecall` in a comment triggers delegatecall detector
+// FP 6: `delegatecall` in a comment must NOT trigger delegatecall
 // -------------------------------------------------------------------
 
 #[test]
-fn fp_delegatecall_in_comment() {
+fn fp_delegatecall_in_comment_does_not_trigger() {
     let source = r#"
 pragma solidity ^0.8.0;
 contract CommentDelegatecallFP {
@@ -163,12 +150,12 @@ contract CommentDelegatecallFP {
     }
 }
 "#;
-    let findings = parse_and_detect(source, detect_dangerous_delegatecall);
+    let findings = run_detector(&DangerousDelegatecallDetector, source);
     let has_fp = findings
         .iter()
         .any(|f| f.detector_id == "dangerous-delegatecall");
-    // S2: flip to assert!(!has_fp)
-    if has_fp {
-        eprintln!("[EXPECTED FP] delegatecall detector triggered by .delegatecall in comment");
-    }
+    assert!(
+        !has_fp,
+        "AST-based delegatecall detector must not trigger on .delegatecall in comment"
+    );
 }

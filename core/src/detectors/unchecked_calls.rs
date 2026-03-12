@@ -1,46 +1,57 @@
 //! Detector: Unchecked external call return values.
 //!
 //! Flags `.call{...}(...)` statements where the return value is not captured
-//! or checked with `require`.
+//! or checked with `require`. Uses AST to inspect expression_statement nodes
+//! containing external calls that aren't wrapped in an assignment.
 
+use crate::ast_utils::{find_nodes_of_kind, is_external_call, is_inside_node_of_kind, node_text};
+use crate::detector_trait::{AnalysisContext, Detector};
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_unchecked_calls(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
-    let root_node = tree.root_node();
-    find_unchecked_calls(&root_node, source, findings);
-}
+pub struct UncheckedCallsDetector;
 
-fn find_unchecked_calls(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
-    if node.kind() == "expression_statement" {
-        let text = &source[node.start_byte()..node.end_byte()];
-
-        // Check for .call without capturing return value
-        if text.contains(".call{") || text.contains(".call(") {
-            // If the line doesn't start with assignment, it's unchecked
-            let trimmed = text.trim();
-            if !trimmed.starts_with("(bool")
-                && !trimmed.starts_with("bool")
-                && !trimmed.contains("= ")
-            {
-                findings.push(Finding {
-                    id: String::new(),
-                    detector_id: "unchecked-call".to_string(),
-                    severity: Severity::Medium,
-                    confidence: Confidence::High,
-                    line: node.start_position().row + 1,
-                    vulnerability_type: "Unchecked Call".to_string(),
-                    message: "External call return value is not checked".to_string(),
-                    suggestion: "Check the return value: (bool success, ) = addr.call(...); require(success);".to_string(),
-                    remediation: None,
-                    owasp_category: Some("SC04:2025 - Lack of Input Validation".to_string()),
-                    file: None,
-                });
+impl Detector for UncheckedCallsDetector {
+    fn id(&self) -> &'static str {
+        "unchecked-calls"
+    }
+    fn name(&self) -> &'static str {
+        "Unchecked External Call Return Values"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Medium
+    }
+    fn owasp_category(&self) -> Option<&'static str> {
+        Some("SC04:2025 - Lack of Input Validation")
+    }
+    fn run(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        let expr_stmts = find_nodes_of_kind(&ctx.tree.root_node(), "expression_statement");
+        for stmt in &expr_stmts {
+            let calls = find_nodes_of_kind(stmt, "call_expression");
+            for call in &calls {
+                if !is_external_call(call, ctx.source) {
+                    continue;
+                }
+                // If the call is inside an assignment or variable declaration, return is captured
+                if is_inside_node_of_kind(call, "assignment_expression")
+                    || is_inside_node_of_kind(call, "variable_declaration_statement")
+                    || is_inside_node_of_kind(call, "variable_declaration")
+                {
+                    continue;
+                }
+                let text = node_text(stmt, ctx.source).trim().to_string();
+                if text.starts_with("(bool") || text.starts_with("bool") || text.contains("= ") {
+                    continue;
+                }
+                findings.push(Finding::from_detector(
+                    self,
+                    stmt.start_position().row + 1,
+                    Confidence::High,
+                    "Unchecked Call",
+                    "External call return value is not checked".to_string(),
+                    "Check the return value: (bool success, ) = addr.call(...); require(success);",
+                ));
+                break;
             }
         }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_unchecked_calls(&child, source, findings);
     }
 }

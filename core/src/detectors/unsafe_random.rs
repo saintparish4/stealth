@@ -2,53 +2,75 @@
 //!
 //! Flags `keccak256(abi.encodePacked(block.timestamp, ...))` and `blockhash()`
 //! patterns that miners or validators can predict or manipulate.
+//! Uses AST to find actual call nodes and member accesses, avoiding false
+//! positives from comments and string literals.
 
+use crate::ast_utils::{
+    find_nodes_of_kind, func_body, get_call_target, get_member_access, node_text, CallTarget,
+};
+use crate::detector_trait::{AnalysisContext, Detector};
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_unsafe_random(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
-    let root_node = tree.root_node();
-    find_random_issues(&root_node, source, findings);
-}
+pub struct UnsafeRandomDetector;
 
-fn find_random_issues(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
-    // Only check at function level to avoid duplicate reports from nested nodes
-    if node.kind() == "function_definition" {
-        let func_text = &source[node.start_byte()..node.end_byte()];
+impl Detector for UnsafeRandomDetector {
+    fn id(&self) -> &'static str {
+        "unsafe-random"
+    }
+    fn name(&self) -> &'static str {
+        "Unsafe Randomness"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn owasp_category(&self) -> Option<&'static str> {
+        Some("SC06:2025 - Unsafe Randomness and Predictability")
+    }
+    fn run(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        for func in &ctx.functions {
+            let body = match func_body(func) {
+                Some(b) => b,
+                None => continue,
+            };
 
-        // Check for common bad randomness patterns
-        let bad_patterns = [
-            "keccak256(abi.encodePacked(block.timestamp",
-            "keccak256(abi.encodePacked(block.difficulty",
-            "keccak256(abi.encodePacked(block.number",
-            "blockhash(",
-        ];
+            let calls = find_nodes_of_kind(&body, "call_expression");
 
-        for pattern in bad_patterns {
-            if func_text.contains(pattern) {
-                findings.push(Finding {
-                    id: String::new(),
-                    detector_id: "unsafe-randomness".to_string(),
-                    severity: Severity::High,
-                    confidence: Confidence::Medium,
-                    line: node.start_position().row + 1,
-                    vulnerability_type: "Unsafe Randomness".to_string(),
-                    message: "Using block variables for randomness can be predicted/manipulated"
-                        .to_string(),
-                    suggestion: "Use Chainlink VRF or commit-reveal scheme for secure randomness"
-                        .to_string(),
-                    remediation: None,
-                    owasp_category: Some(
-                        "SC06:2025 - Unsafe Randomness and Predictability".to_string(),
-                    ),
-                    file: None,
-                });
-                return; // One report per function is enough
+            let has_bad_randomness = calls.iter().any(|call| {
+                match get_call_target(call, ctx.source) {
+                    Some(CallTarget::FreeFunction { name: "blockhash" }) => return true,
+                    Some(CallTarget::FreeFunction { name: "keccak256" }) => {
+                        // Check if args contain block.timestamp/difficulty/number
+                        let call_text = node_text(call, ctx.source);
+                        let members = find_nodes_of_kind(call, "member_expression")
+                            .into_iter()
+                            .chain(find_nodes_of_kind(call, "member_access_expression"));
+                        for m in members {
+                            if let Some(("block", prop)) = get_member_access(&m, ctx.source) {
+                                if matches!(
+                                    prop,
+                                    "timestamp" | "difficulty" | "number" | "prevrandao"
+                                ) && call_text.contains("abi.encodePacked")
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                false
+            });
+
+            if has_bad_randomness {
+                findings.push(Finding::from_detector(
+                    self,
+                    func.start_position().row + 1,
+                    Confidence::Medium,
+                    "Unsafe Randomness",
+                    "Using block variables for randomness can be predicted/manipulated".to_string(),
+                    "Use Chainlink VRF or commit-reveal scheme for secure randomness",
+                ));
             }
         }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        find_random_issues(&child, source, findings);
     }
 }
