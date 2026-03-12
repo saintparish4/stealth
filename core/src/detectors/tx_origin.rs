@@ -18,6 +18,8 @@ fn find_tx_origin(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Fin
         // Check if it's used for authorization (comparison)
         if text.contains("==") || text.contains("!=") {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "tx-origin".to_string(),
                 severity: Severity::High,
                 confidence: Confidence::High,
                 line: node.start_position().row + 1,
@@ -26,6 +28,8 @@ fn find_tx_origin(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Fin
                     .to_string(),
                 suggestion: "Use msg.sender instead of tx.origin for authentication checks"
                     .to_string(),
+                remediation: None,
+                owasp_category: Some("SC01:2025 - Access Control Vulnerabilities".to_string()),
                 file: None,
             });
             return; // Don't recurse into children - we found it

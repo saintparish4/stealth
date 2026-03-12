@@ -26,6 +26,8 @@ fn find_delegatecall_issues(node: &tree_sitter::Node, source: &str, findings: &m
 
             if has_address_param && !has_access_control(func_text) {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "dangerous-delegatecall".to_string(),
                     severity: Severity::Critical,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
@@ -35,6 +37,8 @@ fn find_delegatecall_issues(node: &tree_sitter::Node, source: &str, findings: &m
                     suggestion:
                         "Add strict access control or use a whitelist for delegatecall targets"
                             .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC01:2025 - Access Control Vulnerabilities".to_string()),
                     file: None,
                 });
             }

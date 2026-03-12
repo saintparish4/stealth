@@ -2,14 +2,8 @@
 
 use crate::helpers::normalize_vuln_type;
 use crate::types::Finding;
-
-#[cfg(feature = "cli")]
-use colored::*;
-#[cfg(feature = "cli")]
 use serde::Deserialize;
-#[cfg(feature = "cli")]
 use std::collections::HashSet;
-#[cfg(feature = "cli")]
 use std::fs;
 
 /// Parsed inline suppression: (line number that is suppressed, optional vulnerability type).
@@ -80,10 +74,9 @@ pub fn filter_findings_by_inline_ignores(findings: Vec<Finding>, source: &str) -
 }
 
 // ============================================================================
-// Baseline loading — CLI only (requires filesystem + colored)
+// Baseline loading
 // ============================================================================
 
-#[cfg(feature = "cli")]
 #[derive(Debug, Deserialize)]
 pub struct BaselineFinding {
     #[serde(default)]
@@ -93,36 +86,24 @@ pub struct BaselineFinding {
     pub vulnerability_type: String,
 }
 
-#[cfg(feature = "cli")]
 #[derive(Debug, Deserialize)]
 pub struct BaselineFile {
     pub findings: Vec<BaselineFinding>,
 }
 
-#[cfg(feature = "cli")]
 /// Load baseline from JSON (same format as scanner output). Returns set of (file, line, type_norm).
 pub fn load_baseline(path: &str) -> HashSet<(String, usize, String)> {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!(
-                "{} Could not read baseline file '{}': {}",
-                "Error:".red().bold(),
-                path,
-                e
-            );
+            eprintln!("Error: Could not read baseline file '{}': {}", path, e);
             return HashSet::new();
         }
     };
     let baseline: BaselineFile = match serde_json::from_str(&content) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!(
-                "{} Invalid baseline JSON in '{}': {}",
-                "Error:".red().bold(),
-                path,
-                e
-            );
+            eprintln!("Error: Invalid baseline JSON in '{}': {}", path, e);
             return HashSet::new();
         }
     };
@@ -138,7 +119,6 @@ pub fn load_baseline(path: &str) -> HashSet<(String, usize, String)> {
         .collect()
 }
 
-#[cfg(feature = "cli")]
 /// Filter to findings not in baseline (only "new" findings).
 pub fn filter_findings_by_baseline(
     findings: Vec<Finding>,

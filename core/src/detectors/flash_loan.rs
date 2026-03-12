@@ -15,11 +15,7 @@ pub fn detect_flash_loan_vulnerability(
     find_flash_loan_patterns(&root_node, source, findings);
 }
 
-fn find_flash_loan_patterns(
-    node: &tree_sitter::Node,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
+fn find_flash_loan_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
     if node.kind() == "function_definition" {
         let func_text = &source[node.start_byte()..node.end_byte()];
         let func_name = extract_function_name(func_text);
@@ -41,6 +37,8 @@ fn find_flash_loan_patterns(
 
         if uses_spot_price && calculates_price && no_twap {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "flash-loan".to_string(),
                 severity: Severity::High,
                 confidence: Confidence::Medium,
                 line: node.start_position().row + 1,
@@ -48,6 +46,8 @@ fn find_flash_loan_patterns(
                 message: "Spot price calculation vulnerable to flash loan manipulation".to_string(),
                 suggestion: "Use TWAP oracle or Chainlink price feeds instead of spot prices"
                     .to_string(),
+                remediation: None,
+                owasp_category: Some("SC07:2025 - Flash Loan Attacks".to_string()),
                 file: None,
             });
         }
@@ -68,6 +68,8 @@ fn find_flash_loan_patterns(
 
             if is_sensitive {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "flash-loan".to_string(),
                     severity: Severity::Medium,
                     confidence: Confidence::Low,
                     line: node.start_position().row + 1,
@@ -78,6 +80,8 @@ fn find_flash_loan_patterns(
                     ),
                     suggestion: "Consider adding flash loan guards or using time-weighted values"
                         .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC07:2025 - Flash Loan Attacks".to_string()),
                     file: None,
                 });
             }
@@ -90,6 +94,8 @@ fn find_flash_loan_patterns(
 
             if !validates_caller {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "flash-loan".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
@@ -97,6 +103,8 @@ fn find_flash_loan_patterns(
                     message: "Flash loan callback without caller validation".to_string(),
                     suggestion: "Validate msg.sender is the expected flash loan provider"
                         .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC07:2025 - Flash Loan Attacks".to_string()),
                     file: None,
                 });
             }

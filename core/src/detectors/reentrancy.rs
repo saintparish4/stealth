@@ -78,6 +78,8 @@ fn find_reentrancy(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Fi
                 };
 
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "reentrancy".to_string(),
                     severity: Severity::High,
                     confidence: adjusted_confidence,
                     line: call_line,
@@ -89,6 +91,8 @@ fn find_reentrancy(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Fi
                     suggestion:
                         "Move state changes before external call, or add nonReentrant modifier"
                             .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC02:2025 - Reentrancy Attacks".to_string()),
                     file: None,
                 });
             }

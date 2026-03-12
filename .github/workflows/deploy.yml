@@ -47,6 +47,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
       
+      # Lint and format checks
+      - name: Check formatting
+        run: cd core && cargo fmt --check
+
+      - name: Run clippy
+        run: cd core && cargo clippy -- -D warnings
+
+      # Run tests
+      - name: Run tests
+        run: cd core && cargo test --verbose
+
       # Build the Rust scanner binary
       - name: Build Rust scanner
         run: |

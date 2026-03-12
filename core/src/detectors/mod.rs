@@ -35,11 +35,7 @@ pub use unsafe_random::detect_unsafe_random;
 use crate::types::Finding;
 
 /// Run every detector against a parsed Solidity AST and append findings.
-pub fn run_all_detectors(
-    tree: &tree_sitter::Tree,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
+pub fn run_all_detectors(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
     detect_reentrancy(tree, source, findings);
     detect_unchecked_calls(tree, source, findings);
     detect_tx_origin(tree, source, findings);

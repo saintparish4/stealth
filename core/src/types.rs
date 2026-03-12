@@ -1,10 +1,13 @@
-//! Core types: severity, confidence, visibility, findings, statistics.
+//! Core types: severity, confidence, visibility, findings, statistics, scan outcome.
 
 #[cfg(feature = "cli")]
 use colored::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub enum Severity {
     Critical,
     High,
@@ -33,7 +36,8 @@ impl Severity {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub enum Confidence {
     High,
     Medium,
@@ -82,8 +86,11 @@ impl Visibility {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct Finding {
+    pub id: String,
+    pub detector_id: String,
     pub severity: Severity,
     pub confidence: Confidence,
     pub line: usize,
@@ -91,10 +98,24 @@ pub struct Finding {
     pub message: String,
     pub suggestion: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owasp_category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
 }
 
 impl Finding {
+    /// Compute the deterministic `id` from file + line + detector_id.
+    /// Call after `file` is set (post-scan).
+    pub fn compute_id(&mut self) {
+        let mut hasher = DefaultHasher::new();
+        self.file.as_deref().unwrap_or("").hash(&mut hasher);
+        self.line.hash(&mut hasher);
+        self.detector_id.hash(&mut hasher);
+        self.id = format!("{:016x}", hasher.finish());
+    }
+
     #[cfg(feature = "cli")]
     pub fn print(&self) {
         println!(
@@ -110,7 +131,8 @@ impl Finding {
     }
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct Statistics {
     pub critical: u32,
     pub high: u32,
@@ -119,4 +141,26 @@ pub struct Statistics {
     pub confidence_high: u32,
     pub confidence_medium: u32,
     pub confidence_low: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+pub struct ScanError {
+    pub file: String,
+    pub kind: ScanErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+pub enum ScanErrorKind {
+    FileReadError,
+    ParseError,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+pub struct ScanOutcome {
+    pub findings: Vec<Finding>,
+    pub errors: Vec<ScanError>,
 }

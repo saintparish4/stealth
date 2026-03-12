@@ -6,12 +6,34 @@ use crate::types::{Confidence, Visibility};
 pub fn is_self_service_function_name(func_name: &str) -> bool {
     let lower_name = func_name.to_lowercase();
     let self_service_names = [
-        "deposit", "withdraw", "withdrawall", "withdrawto", "claim", "claimreward",
-        "claimrewards", "claimall", "stake", "unstake", "restake", "transfer",
-        "approve", "transferfrom", "mint", "burn", "redeem", "redeemall", "exit",
-        "leave", "emergencywithdraw", "harvest", "compound", "reinvest",
+        "deposit",
+        "withdraw",
+        "withdrawall",
+        "withdrawto",
+        "claim",
+        "claimreward",
+        "claimrewards",
+        "claimall",
+        "stake",
+        "unstake",
+        "restake",
+        "transfer",
+        "approve",
+        "transferfrom",
+        "mint",
+        "burn",
+        "redeem",
+        "redeemall",
+        "exit",
+        "leave",
+        "emergencywithdraw",
+        "harvest",
+        "compound",
+        "reinvest",
     ];
-    self_service_names.iter().any(|&name| lower_name.contains(name))
+    self_service_names
+        .iter()
+        .any(|&name| lower_name.contains(name))
 }
 
 /// Check if a function operates only on msg.sender's data
@@ -44,11 +66,20 @@ pub fn should_skip_access_control_warning(func_name: &str, func_text: &str) -> b
 pub fn get_function_visibility(func_text: &str) -> Visibility {
     let signature_end = func_text.find('{').unwrap_or(func_text.len());
     let signature = &func_text[..signature_end];
-    if signature.contains(" private") || signature.contains("\tprivate") || signature.contains("(private") {
+    if signature.contains(" private")
+        || signature.contains("\tprivate")
+        || signature.contains("(private")
+    {
         Visibility::Private
-    } else if signature.contains(" internal") || signature.contains("\tinternal") || signature.contains("(internal") {
+    } else if signature.contains(" internal")
+        || signature.contains("\tinternal")
+        || signature.contains("(internal")
+    {
         Visibility::Internal
-    } else if signature.contains(" external") || signature.contains("\texternal") || signature.contains("(external") {
+    } else if signature.contains(" external")
+        || signature.contains("\texternal")
+        || signature.contains("(external")
+    {
         Visibility::External
     } else {
         Visibility::Public
@@ -83,7 +114,10 @@ pub fn has_modifier(func_text: &str, modifiers: &[&str]) -> bool {
 
 /// Check for reentrancy guard modifiers
 pub fn has_reentrancy_guard(func_text: &str) -> bool {
-    has_modifier(func_text, &["nonReentrant", "noReentrant", "reentrancyGuard", "lock"])
+    has_modifier(
+        func_text,
+        &["nonReentrant", "noReentrant", "reentrancyGuard", "lock"],
+    )
 }
 
 /// Check if function has access control
@@ -101,5 +135,5 @@ pub fn has_access_control(func_text: &str) -> bool {
 
 /// Normalize vulnerability type for matching (suppression, baseline)
 pub fn normalize_vuln_type(s: &str) -> String {
-    s.to_lowercase().replace('-', " ").replace('_', " ")
+    s.to_lowercase().replace(['-', '_'], " ")
 }

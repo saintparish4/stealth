@@ -1,48 +1,17 @@
 //! Output formatting: terminal, JSON, and SARIF 2.1.0.
+//!
+//! `format_*` functions return `String` for library/worker use.
+//! `print_*` wrappers (cli-only) call `format_*` + `println!`.
 
 use crate::types::{Finding, Severity, Statistics};
-use colored::*;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub fn print_results(path: &str, findings: &[Finding], stats: &Statistics) {
-    println!("\n{}", "═".repeat(60).dimmed());
-    println!("{}", "Stealth Security Scan Results".bold().underline());
-    println!("{}", "═".repeat(60).dimmed());
-    println!("{} {}\n", "Scanning:".bold(), path);
+// ============================================================================
+// format_* functions — always available, return String
+// ============================================================================
 
-    if findings.is_empty() {
-        println!("{}", "✓ No vulnerabilities found!".green().bold());
-    } else {
-        println!(
-            "{} {} vulnerabilities found:\n",
-            "⚠".yellow(),
-            findings.len()
-        );
-
-        for finding in findings {
-            finding.print();
-        }
-
-        println!("{}", "─".repeat(60).dimmed());
-        println!("{}", "Summary".bold());
-        if stats.critical > 0 {
-            println!("  {} Critical: {}", "●".red(), stats.critical);
-        }
-        if stats.high > 0 {
-            println!("  {} High: {}", "●".red(), stats.high);
-        }
-        if stats.medium > 0 {
-            println!("  {} Medium: {}", "●".yellow(), stats.medium);
-        }
-        if stats.low > 0 {
-            println!("  {} Low: {}", "●".blue(), stats.low);
-        }
-    }
-    println!();
-}
-
-pub fn print_json(findings: &[Finding], stats: &Statistics) {
+pub fn format_json(findings: &[Finding], stats: &Statistics) -> String {
     #[derive(Serialize)]
     struct Output<'a> {
         findings: &'a [Finding],
@@ -53,10 +22,81 @@ pub fn print_json(findings: &[Finding], stats: &Statistics) {
         findings,
         statistics: stats,
     };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&output).unwrap_or_default()
-    );
+    serde_json::to_string_pretty(&output).unwrap_or_default()
+}
+
+#[cfg(feature = "cli")]
+pub fn format_terminal(path: &str, findings: &[Finding], stats: &Statistics) -> String {
+    use colored::*;
+    let mut out = String::new();
+
+    out.push_str(&format!("\n{}\n", "═".repeat(60).dimmed()));
+    out.push_str(&format!(
+        "{}\n",
+        "Stealth Security Scan Results".bold().underline()
+    ));
+    out.push_str(&format!("{}\n", "═".repeat(60).dimmed()));
+    out.push_str(&format!("{} {}\n\n", "Scanning:".bold(), path));
+
+    if findings.is_empty() {
+        out.push_str(&format!(
+            "{}\n",
+            "✓ No vulnerabilities found!".green().bold()
+        ));
+    } else {
+        out.push_str(&format!(
+            "{} {} vulnerabilities found:\n\n",
+            "⚠".yellow(),
+            findings.len()
+        ));
+
+        for finding in findings {
+            out.push_str(&format!(
+                "[{}] {} at line {} (Confidence: {})\n",
+                finding.severity.as_colored_str(),
+                finding.vulnerability_type.bold(),
+                finding.line,
+                finding.confidence.as_str().dimmed()
+            ));
+            out.push_str(&format!("  {} {}\n", "→".cyan(), finding.message));
+            out.push_str(&format!(
+                "  {} {}\n\n",
+                "Fix:".green().bold(),
+                finding.suggestion
+            ));
+        }
+
+        out.push_str(&format!("{}\n", "─".repeat(60).dimmed()));
+        out.push_str(&format!("{}\n", "Summary".bold()));
+        if stats.critical > 0 {
+            out.push_str(&format!("  {} Critical: {}\n", "●".red(), stats.critical));
+        }
+        if stats.high > 0 {
+            out.push_str(&format!("  {} High: {}\n", "●".red(), stats.high));
+        }
+        if stats.medium > 0 {
+            out.push_str(&format!("  {} Medium: {}\n", "●".yellow(), stats.medium));
+        }
+        if stats.low > 0 {
+            out.push_str(&format!("  {} Low: {}\n", "●".blue(), stats.low));
+        }
+    }
+    out.push('\n');
+    out
+}
+
+// ============================================================================
+// print_* wrappers — CLI only
+// ============================================================================
+
+#[cfg(feature = "cli")]
+pub fn print_results(path: &str, findings: &[Finding], stats: &Statistics) {
+    print!("{}", format_terminal(path, findings, stats));
+}
+
+#[cfg(feature = "cli")]
+pub fn print_json(findings: &[Finding], stats: &Statistics) {
+    println!("{}", format_json(findings, stats));
 }
 
 // ============================================================================
@@ -193,7 +233,7 @@ struct SarifRegion {
     start_line: usize,
 }
 
-/// Print findings as SARIF 2.1.0 JSON to stdout.
+/// Format findings as SARIF 2.1.0 JSON string.
 ///
 /// Produces a single `run` with one `result` per finding. Rules are
 /// deduplicated: each unique vulnerability type becomes one entry in
@@ -201,7 +241,7 @@ struct SarifRegion {
 ///
 /// This output is compatible with GitHub Code Scanning's
 /// `github/codeql-action/upload-sarif` action.
-pub fn print_sarif(findings: &[Finding]) {
+pub fn format_sarif(findings: &[Finding]) -> String {
     // Build deduplicated rules list, preserving insertion order via BTreeMap
     // keyed on rule_id so output is deterministic.
     let mut rule_map: BTreeMap<String, (usize, SarifRule)> = BTreeMap::new();
@@ -261,11 +301,7 @@ pub fn print_sarif(findings: &[Finding]) {
                 format!("{} Fix: {}", f.message, f.suggestion)
             };
 
-            let uri = f
-                .file
-                .as_deref()
-                .unwrap_or("unknown")
-                .replace('\\', "/");
+            let uri = f.file.as_deref().unwrap_or("unknown").replace('\\', "/");
 
             SarifResult {
                 rule_id: id,
@@ -275,9 +311,7 @@ pub fn print_sarif(findings: &[Finding]) {
                 locations: vec![SarifLocation {
                     physical_location: SarifPhysicalLocation {
                         artifact_location: SarifArtifactLocation { uri },
-                        region: SarifRegion {
-                            start_line: f.line,
-                        },
+                        region: SarifRegion { start_line: f.line },
                     },
                 }],
             }
@@ -300,8 +334,10 @@ pub fn print_sarif(findings: &[Finding]) {
         }],
     };
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&log).unwrap_or_default()
-    );
+    serde_json::to_string_pretty(&log).unwrap_or_default()
+}
+
+#[cfg(feature = "cli")]
+pub fn print_sarif(findings: &[Finding]) {
+    println!("{}", format_sarif(findings));
 }

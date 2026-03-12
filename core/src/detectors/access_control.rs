@@ -15,11 +15,7 @@ pub fn detect_access_control(tree: &tree_sitter::Tree, source: &str, findings: &
     find_access_control_issues(&root_node, source, findings);
 }
 
-fn find_access_control_issues(
-    node: &tree_sitter::Node,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
+fn find_access_control_issues(node: &tree_sitter::Node, source: &str, findings: &mut Vec<Finding>) {
     if node.kind() == "function_definition" {
         let func_text = &source[node.start_byte()..node.end_byte()];
         let func_name = extract_function_name(func_text);
@@ -113,6 +109,8 @@ fn find_access_control_issues(
             }
 
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "access-control".to_string(),
                 severity: Severity::High,
                 confidence: Confidence::High,
                 line: node.start_position().row + 1,
@@ -123,6 +121,8 @@ fn find_access_control_issues(
                 ),
                 suggestion: "Add onlyOwner, onlyAdmin, or similar access control modifier"
                     .to_string(),
+                remediation: None,
+                owasp_category: Some("SC01:2025 - Access Control Vulnerabilities".to_string()),
                 file: None,
             });
         }
@@ -150,6 +150,8 @@ fn find_access_control_issues(
 
             if has_arbitrary_recipient && !has_access_control(func_text) {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "access-control".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
@@ -160,6 +162,8 @@ fn find_access_control_issues(
                     ),
                     suggestion: "Add access control or restrict to msg.sender withdrawals only"
                         .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC01:2025 - Access Control Vulnerabilities".to_string()),
                     file: None,
                 });
             }

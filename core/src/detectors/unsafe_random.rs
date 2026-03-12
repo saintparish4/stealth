@@ -5,11 +5,7 @@
 
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_unsafe_random(
-    tree: &tree_sitter::Tree,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
+pub fn detect_unsafe_random(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
     let root_node = tree.root_node();
     find_random_issues(&root_node, source, findings);
 }
@@ -30,6 +26,8 @@ fn find_random_issues(node: &tree_sitter::Node, source: &str, findings: &mut Vec
         for pattern in bad_patterns {
             if func_text.contains(pattern) {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "unsafe-randomness".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::Medium,
                     line: node.start_position().row + 1,
@@ -38,6 +36,10 @@ fn find_random_issues(node: &tree_sitter::Node, source: &str, findings: &mut Vec
                         .to_string(),
                     suggestion: "Use Chainlink VRF or commit-reveal scheme for secure randomness"
                         .to_string(),
+                    remediation: None,
+                    owasp_category: Some(
+                        "SC06:2025 - Unsafe Randomness and Predictability".to_string(),
+                    ),
                     file: None,
                 });
                 return; // One report per function is enough

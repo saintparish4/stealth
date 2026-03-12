@@ -37,6 +37,8 @@ fn find_unchecked_math(node: &tree_sitter::Node, source: &str, findings: &mut Ve
 
         if has_arithmetic {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "integer-overflow".to_string(),
                 severity: Severity::Medium,
                 confidence: Confidence::Medium,
                 line: node.start_position().row + 1,
@@ -44,6 +46,8 @@ fn find_unchecked_math(node: &tree_sitter::Node, source: &str, findings: &mut Ve
                 message: "Arithmetic in unchecked block bypasses overflow protection".to_string(),
                 suggestion: "Ensure overflow/underflow is impossible or add manual checks"
                     .to_string(),
+                remediation: None,
+                owasp_category: Some("SC03:2025 - Integer Overflow and Underflow".to_string()),
                 file: None,
             });
         }
@@ -76,12 +80,16 @@ fn find_unsafe_math(node: &tree_sitter::Node, source: &str, findings: &mut Vec<F
 
             if has_unsafe_add || has_unsafe_sub || has_unsafe_mul {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "integer-overflow".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::Medium,
                     line: node.start_position().row + 1,
                     vulnerability_type: "Integer Overflow/Underflow".to_string(),
                     message: "Arithmetic operation without SafeMath in Solidity <0.8".to_string(),
                     suggestion: "Use SafeMath library or upgrade to Solidity >=0.8.0".to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC03:2025 - Integer Overflow and Underflow".to_string()),
                     file: None,
                 });
             }

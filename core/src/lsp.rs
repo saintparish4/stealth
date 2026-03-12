@@ -26,9 +26,7 @@ impl StealthLsp {
         let client = self.client.clone();
         let uri = uri.clone();
         tokio::spawn(async move {
-            client
-                .publish_diagnostics(uri, diagnostics, None)
-                .await;
+            client.publish_diagnostics(uri, diagnostics, None).await;
         });
     }
 }
@@ -119,7 +117,10 @@ fn scan_to_diagnostics(source: &str) -> Vec<Diagnostic> {
     run_all_detectors(&tree, source, &mut findings);
     let findings = filter_findings_by_inline_ignores(findings, source);
 
-    findings.iter().map(|f| finding_to_diagnostic(f, source)).collect()
+    findings
+        .iter()
+        .map(|f| finding_to_diagnostic(f, source))
+        .collect()
 }
 
 fn finding_to_diagnostic(finding: &Finding, source: &str) -> Diagnostic {

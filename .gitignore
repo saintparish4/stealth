@@ -3,6 +3,9 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Tests
+core/tests/snapshots/
+
 # Cargo
 # Cargo.lock should be committed for binary projects (like this one)
 # Uncomment the line below if this becomes a library project

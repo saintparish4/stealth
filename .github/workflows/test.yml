@@ -1,0 +1,65 @@
+name: Test Suite
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core-tests:
+    name: Core (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            core/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Format check
+        run: cd core && cargo fmt --check
+
+      - name: Clippy
+        run: cd core && cargo clippy -- -D warnings
+
+      - name: Unit tests
+        run: cd core && cargo test
+
+      - name: CLI integration tests
+        run: |
+          cd core
+          cargo build --release
+          cargo test --test cli_integration --test snapshots
+
+  web-checks:
+    name: Web (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: cd web && npm ci
+
+      - name: Lint
+        run: cd web && npm run lint
+
+      - name: Build
+        run: cd web && npm run build

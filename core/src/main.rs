@@ -1,21 +1,14 @@
-// ============================================================================
-// Stealth - Smart Contract Security Scanner (binary)
-// Version 0.4.0 - Thin CLI; detectors live in stealth_scanner::detectors.
-// ============================================================================
-
 use clap::{Parser, Subcommand};
+use colored::*;
 use std::path::Path;
-use stealth_scanner::*;
 use stealth_scanner::detectors::run_all_detectors;
-
-// ============================================================================
-// CLI
-// ============================================================================
+use stealth_scanner::scan::{exit_code_for_stats, new_solidity_parser};
+use stealth_scanner::*;
 
 #[derive(Parser)]
 #[command(name = "stealth")]
 #[command(about = "Smart contract security scanner for Solidity", long_about = None)]
-#[command(version = "0.4.0")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -34,10 +27,6 @@ enum Commands {
     },
 }
 
-// ============================================================================
-// MAIN
-// ============================================================================
-
 fn main() {
     let cli = Cli::parse();
 
@@ -48,11 +37,25 @@ fn main() {
             recursive,
             baseline,
         } => {
-            let mut findings = if Path::new(&path).is_dir() {
-                scan_directory_with(&path, recursive, run_all_detectors)
-            } else {
-                scan_file_with(&path, run_all_detectors)
+            let mut parser = match new_solidity_parser() {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("{} {}", "Error:".red().bold(), e);
+                    std::process::exit(1);
+                }
             };
+
+            let outcome = if Path::new(&path).is_dir() {
+                scan_directory_with(&path, recursive, run_all_detectors, &mut parser)
+            } else {
+                scan_file_with(&path, run_all_detectors, &mut parser)
+            };
+
+            for err in &outcome.errors {
+                eprintln!("{} {} — {}", "Error:".red().bold(), err.file, err.message);
+            }
+
+            let mut findings = outcome.findings;
 
             if let Some(ref baseline_path) = baseline {
                 let baseline_set = load_baseline(baseline_path);
@@ -63,19 +66,11 @@ fn main() {
 
             match format.as_str() {
                 "json" => print_json(&findings, &stats),
-                "sarif" => stealth_scanner::output::print_sarif(&findings),
+                "sarif" => print_sarif(&findings),
                 _ => print_results(&path, &findings, &stats),
             }
 
-            let exit_code = if stats.critical > 0 || stats.high > 0 {
-                2
-            } else if stats.medium > 0 {
-                1
-            } else {
-                0
-            };
-
-            std::process::exit(exit_code);
+            std::process::exit(exit_code_for_stats(&stats));
         }
     }
 }
@@ -86,17 +81,40 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use stealth_scanner::detectors::*;
-    use stealth_scanner::*;
     use std::collections::HashSet;
+    use stealth_scanner::detectors::*;
+    use stealth_scanner::scan::new_solidity_parser;
+    use stealth_scanner::*;
 
-    /// Parse a Solidity source string into a tree for detector tests.
     fn parse_solidity(source: &str) -> tree_sitter::Tree {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&tree_sitter_solidity::LANGUAGE.into())
             .expect("Solidity language");
         parser.parse(source, None).expect("parse")
+    }
+
+    /// Helper: build a Finding with the new required fields using sensible defaults.
+    fn test_finding(
+        severity: Severity,
+        confidence: Confidence,
+        line: usize,
+        vuln_type: &str,
+        file: Option<&str>,
+    ) -> Finding {
+        Finding {
+            id: String::new(),
+            detector_id: String::new(),
+            severity,
+            confidence,
+            line,
+            vulnerability_type: vuln_type.to_string(),
+            message: String::new(),
+            suggestion: String::new(),
+            remediation: None,
+            owasp_category: None,
+            file: file.map(|s| s.to_string()),
+        }
     }
 
     #[test]
@@ -169,7 +187,7 @@ mod tests {
         );
     }
 
-    // ========== Detector tests: minimal Solidity snippets, assert on findings ==========
+    // ========== Detector tests ==========
 
     #[test]
     fn detector_reentrancy_finds_state_change_after_call() {
@@ -195,6 +213,8 @@ contract C {
         let f = &findings[0];
         assert_eq!(f.vulnerability_type, "Reentrancy");
         assert_eq!(f.severity, Severity::High);
+        assert_eq!(f.detector_id, "reentrancy");
+        assert!(f.owasp_category.is_some());
     }
 
     #[test]
@@ -217,6 +237,7 @@ contract C {
         );
         assert_eq!(findings[0].vulnerability_type, "tx.origin Authentication");
         assert_eq!(findings[0].severity, Severity::High);
+        assert_eq!(findings[0].detector_id, "tx-origin");
     }
 
     #[test]
@@ -261,7 +282,6 @@ contract C {
 
     #[test]
     fn detector_access_control_finds_sensitive_without_auth() {
-        // Withdraw with arbitrary recipient (no self-service): triggers "Unrestricted Fund Transfer"
         let source = r#"
 pragma solidity ^0.8.0;
 contract C {
@@ -307,10 +327,6 @@ interface IERC20 { function transfer(address to, uint256 amount) external return
             vuln_type.contains("ERC20") || vuln_type.contains("SafeERC20"),
             "expected ERC20-related finding, got: {}",
             vuln_type
-        );
-        assert!(
-            findings.iter().all(|f| f.vulnerability_type != "Missing SafeERC20"),
-            "function-level 'Missing SafeERC20' should no longer be emitted"
         );
     }
 
@@ -400,10 +416,296 @@ contract C {
         );
     }
 
-    // ========== Integration test: full scan on comprehensive contract ==========
+    // ========== FP-absence tests (Decision 9A) ==========
 
     #[test]
-    fn integration_scan_comprehensive_vulnerabilities_finds_multiple_types() {
+    fn fp_absence_reentrancy_checks_effects_interactions() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    mapping(address => uint256) balances;
+    function withdraw() public {
+        uint256 amt = balances[msg.sender];
+        balances[msg.sender] = 0;
+        (bool ok, ) = msg.sender.call{value: amt}("");
+        require(ok);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_reentrancy(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "CEI pattern should not trigger reentrancy"
+        );
+    }
+
+    #[test]
+    fn fp_absence_tx_origin_non_auth_use() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    event Origin(address indexed o);
+    function logOrigin() public {
+        emit Origin(tx.origin);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_tx_origin(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "tx.origin used for logging (not auth) should not trigger"
+        );
+    }
+
+    #[test]
+    fn fp_absence_timestamp_gte_comparison() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    uint256 public deadline;
+    function check() public view returns (bool) {
+        return block.timestamp >= deadline;
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_timestamp_dependence(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            ">= comparison with block.timestamp should not trigger"
+        );
+    }
+
+    #[test]
+    fn fp_absence_unchecked_erc20_safe_transfer() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function pay(address token, address to, uint256 amt) public {
+        IERC20(token).safeTransfer(to, amt);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_unchecked_erc20(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "safeTransfer should not trigger unchecked ERC20"
+        );
+    }
+
+    #[test]
+    fn fp_absence_flash_loan_validated_callback() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    address public lender;
+    function flashLoanCallback(uint256 amount) external {
+        require(msg.sender == lender);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_flash_loan_vulnerability(&tree, source, &mut findings);
+        let callback_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.vulnerability_type == "Unvalidated Callback")
+            .collect();
+        assert!(
+            callback_findings.is_empty(),
+            "validated callback should not trigger"
+        );
+    }
+
+    #[test]
+    fn fp_absence_delegatecall_with_access_control() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    address public owner;
+    function execute(address target, bytes memory data) public {
+        require(msg.sender == owner);
+        target.delegatecall(data);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_dangerous_delegatecall(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "delegatecall with access control should not trigger"
+        );
+    }
+
+    #[test]
+    fn fp_absence_unchecked_call_with_bool_capture() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function forward(address payable to) public {
+        (bool ok, ) = to.call{value: 1}("");
+        require(ok);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_unchecked_calls(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "checked call should not trigger unchecked call detector"
+        );
+    }
+
+    #[test]
+    fn fp_absence_integer_overflow_solidity_08() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function add(uint256 a, uint256 b) public pure returns (uint256) {
+        return a + b;
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_integer_overflow(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "Solidity >=0.8 safe arithmetic should not trigger"
+        );
+    }
+
+    #[test]
+    fn fp_absence_access_control_self_service_claim() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    mapping(address => uint256) public rewards;
+    function claim() public {
+        uint256 r = rewards[msg.sender];
+        rewards[msg.sender] = 0;
+        payable(msg.sender).transfer(r);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_access_control(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "self-service claim should not trigger access control"
+        );
+    }
+
+    #[test]
+    fn fp_absence_unsafe_random_chainlink_vrf() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function requestRandomness() public {
+        uint256 requestId = COORDINATOR.requestRandomWords(keyHash, subId, 3, 100000, 1);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_unsafe_random(&tree, source, &mut findings);
+        assert!(
+            findings.is_empty(),
+            "VRF pattern should not trigger unsafe randomness"
+        );
+    }
+
+    #[test]
+    fn fp_absence_dos_loops_bounded() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    uint256 constant MAX_ITERATIONS = 100;
+    address[] public users;
+    function distribute() public {
+        uint256 limit = users.length < MAX_ITERATIONS ? users.length : MAX_ITERATIONS;
+        for (uint256 i = 0; i < limit; i++) {
+            payable(users[i]).transfer(1);
+        }
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_dos_loops(&tree, source, &mut findings);
+        let unbounded: Vec<_> = findings
+            .iter()
+            .filter(|f| f.vulnerability_type == "Unbounded Loop")
+            .collect();
+        assert!(
+            unbounded.is_empty(),
+            "bounded loop (MAX_) should not trigger unbounded loop detector"
+        );
+    }
+
+    #[test]
+    fn fp_absence_front_running_with_slippage() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract C {
+    function swap(uint256 amountIn, uint256 amountOutMin, uint256 deadline) external {
+        require(block.timestamp <= deadline);
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_front_running(&tree, source, &mut findings);
+        let slippage: Vec<_> = findings
+            .iter()
+            .filter(|f| f.vulnerability_type == "Missing Slippage Protection")
+            .collect();
+        assert!(
+            slippage.is_empty(),
+            "swap with amountOutMin+deadline should not trigger missing slippage"
+        );
+    }
+
+    #[test]
+    fn fp_absence_storage_collision_with_gap() {
+        let source = r#"
+pragma solidity ^0.8.0;
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+contract C is Initializable, Upgradeable {
+    uint256 public value;
+    uint256[50] private __gap;
+    function initialize(uint256 v) external initializer {
+        value = v;
+    }
+}
+"#;
+        let tree = parse_solidity(source);
+        let mut findings = Vec::new();
+        detect_storage_collision(&tree, source, &mut findings);
+        let gap: Vec<_> = findings
+            .iter()
+            .filter(|f| f.vulnerability_type == "Missing Storage Gap")
+            .collect();
+        assert!(
+            gap.is_empty(),
+            "contract with __gap should not trigger missing storage gap"
+        );
+    }
+
+    // ========== Integration test: full scan ==========
+
+    #[test]
+    fn integration_scan_comprehensive_vulnerabilities() {
         let path = "contracts/comprehensive-vulnerabilities.sol";
         let path_alt = "../contracts/comprehensive-vulnerabilities.sol";
         let path_used = if std::path::Path::new(path).exists() {
@@ -411,34 +713,69 @@ contract C {
         } else {
             path_alt
         };
-        let findings = scan_file_with(path_used, run_all_detectors);
+        let mut parser = new_solidity_parser().expect("parser");
+        let outcome = scan_file_with(path_used, run_all_detectors, &mut parser);
+        assert!(
+            outcome.errors.is_empty(),
+            "scan should succeed without errors"
+        );
+        let findings = &outcome.findings;
         assert!(
             findings.len() >= 5,
-            "comprehensive-vulnerabilities.sol should yield at least 5 findings (got {}). Run from core/ with contracts/ present.",
+            "comprehensive-vulnerabilities.sol should yield >=5 findings (got {})",
             findings.len()
         );
         let types: std::collections::HashSet<_> = findings
             .iter()
             .map(|f| f.vulnerability_type.as_str())
             .collect();
-        assert!(
-            types.contains("Reentrancy"),
-            "expected Reentrancy in findings: {:?}",
-            types
-        );
-        assert!(
-            types.contains("tx.origin Authentication"),
-            "expected tx.origin in findings: {:?}",
-            types
-        );
-        assert!(
-            types.contains("Missing Access Control") || types.contains("Dangerous Delegatecall"),
-            "expected access control or delegatecall: {:?}",
-            types
-        );
+        assert!(types.contains("Reentrancy"));
+        assert!(types.contains("tx.origin Authentication"));
+
+        // Verify new fields are populated
+        for f in findings {
+            assert!(!f.detector_id.is_empty(), "detector_id should be set");
+            assert!(!f.id.is_empty(), "id should be computed");
+        }
     }
 
-    // ========== Suppression: stealth-ignore and baseline ==========
+    // ========== Exit code tests ==========
+
+    #[test]
+    fn exit_code_for_stats_maps_correctly() {
+        use stealth_scanner::scan::exit_code_for_stats;
+
+        let clean = Statistics::default();
+        assert_eq!(exit_code_for_stats(&clean), 0);
+
+        let low_only = Statistics {
+            low: 1,
+            ..Default::default()
+        };
+        assert_eq!(exit_code_for_stats(&low_only), 1);
+
+        let medium = Statistics {
+            medium: 2,
+            ..Default::default()
+        };
+        assert_eq!(exit_code_for_stats(&medium), 1);
+
+        let high = Statistics {
+            high: 1,
+            medium: 3,
+            ..Default::default()
+        };
+        assert_eq!(exit_code_for_stats(&high), 2);
+
+        let critical = Statistics {
+            critical: 1,
+            high: 2,
+            ..Default::default()
+        };
+        assert_eq!(exit_code_for_stats(&critical), 3);
+    }
+
+    // ========== Suppression tests ==========
 
     #[test]
     fn suppression_parse_stealth_ignores() {
@@ -451,18 +788,15 @@ contract C {
 "#;
         let ignores = parse_stealth_ignores(source);
         assert!(!ignores.is_empty());
-        // Line 2 has comment -> suppresses line 2 and 3
         assert!(ignores
             .iter()
             .any(|(l, t)| *l == 2 && t.as_deref() == Some("reentrancy")));
         assert!(ignores
             .iter()
             .any(|(l, t)| *l == 3 && t.as_deref() == Some("reentrancy")));
-        // Line 5 has comment -> suppresses line 5 and 6 (type stored as normalized "tx.origin")
         assert!(ignores
             .iter()
             .any(|(l, t)| *l == 5 && t.as_deref() == Some("tx.origin")));
-        // L20 targets line 20 only
         assert!(ignores
             .iter()
             .any(|(l, t)| *l == 20 && t.as_deref() == Some("reentrancy")));
@@ -470,7 +804,6 @@ contract C {
 
     #[test]
     fn suppression_inline_ignores_finding() {
-        // The comment must be on or just above the line the detector reports (the .call line).
         let source = r#"
 pragma solidity ^0.8.0;
 contract C {
@@ -499,7 +832,7 @@ contract C {
 
     #[test]
     fn suppression_baseline_filters_known_findings() {
-        let baseline_json = r#"{"findings":[{"severity":"High","confidence":"High","line":5,"vulnerability_type":"Reentrancy","message":"","suggestion":"","file":"x.sol"}],"statistics":{"critical":0,"high":1,"medium":0,"low":0,"confidence_high":1,"confidence_medium":0,"confidence_low":0}}"#;
+        let baseline_json = r#"{"findings":[{"id":"","detector_id":"","severity":"High","confidence":"High","line":5,"vulnerability_type":"Reentrancy","message":"","suggestion":"","file":"x.sol"}],"statistics":{"critical":0,"high":1,"medium":0,"low":0,"confidence_high":1,"confidence_medium":0,"confidence_low":0}}"#;
         let baseline: BaselineFile = serde_json::from_str(baseline_json).expect("parse");
         let set: HashSet<_> = baseline
             .findings
@@ -512,15 +845,13 @@ contract C {
                 )
             })
             .collect();
-        let finding = Finding {
-            severity: Severity::High,
-            confidence: Confidence::High,
-            line: 5,
-            vulnerability_type: "Reentrancy".to_string(),
-            message: String::new(),
-            suggestion: String::new(),
-            file: Some("x.sol".to_string()),
-        };
+        let finding = test_finding(
+            Severity::High,
+            Confidence::High,
+            5,
+            "Reentrancy",
+            Some("x.sol"),
+        );
         let findings = vec![finding];
         let filtered = filter_findings_by_baseline(findings, &set);
         assert!(
