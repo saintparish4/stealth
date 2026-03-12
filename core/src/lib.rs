@@ -4,6 +4,7 @@
 //! Module:  lsp (LSP-only — requires `lsp` feature).
 //! Module:  wasm (WASM-only — requires `wasm` feature).
 
+pub mod detector_trait;
 pub mod detectors;
 pub mod helpers;
 pub mod output;
@@ -18,6 +19,7 @@ pub mod wasm;
 
 // --- Re-exports (always available) ------------------------------------------
 
+pub use detector_trait::{AnalysisContext, Detector, DetectorRegistry};
 pub use helpers::*;
 pub use output::{format_json, format_sarif};
 pub use scan::{calculate_statistics, scan_directory_with, scan_file_with};
