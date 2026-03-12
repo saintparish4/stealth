@@ -50,8 +50,7 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
                 let has_external_call = func_text.contains(".call")
                     || func_text.contains(".transfer")
                     || func_text.contains(".send");
-                let has_storage_write =
-                    func_text.contains(" = ") || func_text.contains("delete ");
+                let has_storage_write = func_text.contains(" = ") || func_text.contains("delete ");
 
                 let severity = if has_external_call {
                     Severity::High
@@ -62,6 +61,8 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
                 };
 
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "dos-loops".to_string(),
                     severity,
                     confidence: Confidence::Medium,
                     line: node.start_position().row + 1,
@@ -71,6 +72,8 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
                         func_name
                     ),
                     suggestion: "Add pagination or maximum iteration limit".to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                     file: None,
                 });
             }
@@ -91,6 +94,8 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
             for pattern in array_patterns {
                 if func_text.contains(pattern) {
                     findings.push(Finding {
+                        id: String::new(),
+                        detector_id: "dos-loops".to_string(),
                         severity: Severity::Medium,
                         confidence: Confidence::Low,
                         line: node.start_position().row + 1,
@@ -99,6 +104,10 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
                             .to_string(),
                         suggestion: "Use mapping instead of array, or implement cleanup mechanism"
                             .to_string(),
+                        remediation: None,
+                        owasp_category: Some(
+                            "SC09:2025 - Denial of Service (DoS) Attacks".to_string(),
+                        ),
                         file: None,
                     });
                     break;
@@ -116,6 +125,8 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
         // Internal ERC20 transfer
         {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "dos-loops".to_string(),
                 severity: Severity::High,
                 confidence: Confidence::High,
                 line: node.start_position().row + 1,
@@ -125,6 +136,8 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
                 suggestion:
                     "Use pull-over-push pattern: let users withdraw instead of pushing to them"
                         .to_string(),
+                remediation: None,
+                owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                 file: None,
             });
         }
@@ -132,12 +145,16 @@ fn find_dos_patterns(node: &tree_sitter::Node, source: &str, findings: &mut Vec<
         // Pattern 4: Delete from array in loop (expensive)
         if (has_for_loop || has_while_loop) && func_text.contains("delete ") {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "dos-loops".to_string(),
                 severity: Severity::Medium,
                 confidence: Confidence::Medium,
                 line: node.start_position().row + 1,
                 vulnerability_type: "Expensive Loop Operation".to_string(),
                 message: "Delete operations in loop are gas-expensive".to_string(),
                 suggestion: "Consider swap-and-pop pattern or lazy deletion".to_string(),
+                remediation: None,
+                owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                 file: None,
             });
         }

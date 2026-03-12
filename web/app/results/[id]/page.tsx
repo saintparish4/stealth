@@ -6,7 +6,7 @@ import Link from 'next/link'
 import Header from '../../components/scanner/Header'
 import ResultsView from '../../components/results/ResultsView'
 import type { ScanResult } from '../../lib/scanner'
-import { Loader2, FileQuestion, ArrowLeft } from 'lucide-react'
+import { Loader2, FileQuestion, ArrowLeft, Info } from 'lucide-react'
 import { Button } from '../../ui/button'
 
 interface ResultsPageProps {
@@ -111,6 +111,13 @@ export default function ResultsPage({ params }: ResultsPageProps) {
       <Header />
       
       <main className="container mx-auto px-6 pt-24 pb-32">
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <span>
+            Results are not persisted. Refreshing or closing this page will lose your scan data.
+            Persistent storage is coming soon.
+          </span>
+        </div>
         <ResultsView result={result} />
       </main>
     </div>

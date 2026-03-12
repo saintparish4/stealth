@@ -44,6 +44,8 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
 
         if has_state_vars && is_upgradeable && !has_storage_gap {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "storage-collision".to_string(),
                 severity: Severity::High,
                 confidence: Confidence::Medium,
                 line: node.start_position().row + 1,
@@ -52,6 +54,8 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
                     .to_string(),
                 suggestion: "Add uint256[50] private __gap; at the end of storage variables"
                     .to_string(),
+                remediation: None,
+                owasp_category: Some("SC08:2025 - Insecure Smart Contract Composition".to_string()),
                 file: None,
             });
         }
@@ -62,6 +66,8 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
             && !contract_text.contains("_initialized")
         {
             findings.push(Finding {
+                id: String::new(),
+                detector_id: "storage-collision".to_string(),
                 severity: Severity::Critical,
                 confidence: Confidence::Medium,
                 line: node.start_position().row + 1,
@@ -69,6 +75,8 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
                 message: "Initialize function without initializer modifier".to_string(),
                 suggestion: "Use OpenZeppelin's Initializable and add initializer modifier"
                     .to_string(),
+                remediation: None,
+                owasp_category: Some("SC08:2025 - Insecure Smart Contract Composition".to_string()),
                 file: None,
             });
         }
@@ -81,6 +89,8 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
 
             if constructor_has_logic {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "storage-collision".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
@@ -89,6 +99,10 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
                         "Upgradeable contract with constructor logic (won't execute for proxy)"
                             .to_string(),
                     suggestion: "Move constructor logic to initialize() function".to_string(),
+                    remediation: None,
+                    owasp_category: Some(
+                        "SC08:2025 - Insecure Smart Contract Composition".to_string(),
+                    ),
                     file: None,
                 });
             }
@@ -106,12 +120,18 @@ fn find_storage_issues(node: &tree_sitter::Node, source: &str, findings: &mut Ve
 
             if !uses_eip1967 {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "storage-collision".to_string(),
                     severity: Severity::Medium,
                     confidence: Confidence::Low,
                     line: node.start_position().row + 1,
                     vulnerability_type: "Non-Standard Storage Slot".to_string(),
                     message: "Direct storage access without EIP-1967 standard slots".to_string(),
                     suggestion: "Use EIP-1967 standard slots for proxy storage".to_string(),
+                    remediation: None,
+                    owasp_category: Some(
+                        "SC08:2025 - Insecure Smart Contract Composition".to_string(),
+                    ),
                     file: None,
                 });
             }

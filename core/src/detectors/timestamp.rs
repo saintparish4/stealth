@@ -31,6 +31,8 @@ fn find_timestamp_issues(node: &tree_sitter::Node, source: &str, findings: &mut 
 
             if has_equality || has_modulo {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "timestamp-dependence".to_string(),
                     severity: if has_modulo {
                         Severity::High
                     } else {
@@ -51,6 +53,10 @@ fn find_timestamp_issues(node: &tree_sitter::Node, source: &str, findings: &mut 
                     suggestion:
                         "Use block.timestamp only for >15 minute precision; avoid equality checks"
                             .to_string(),
+                    remediation: None,
+                    owasp_category: Some(
+                        "SC06:2025 - Unsafe Randomness and Predictability".to_string(),
+                    ),
                     file: None,
                 });
             }

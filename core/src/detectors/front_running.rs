@@ -7,11 +7,7 @@
 use crate::helpers::{extract_function_name, get_function_visibility};
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_front_running(
-    tree: &tree_sitter::Tree,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
+pub fn detect_front_running(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
     let root_node = tree.root_node();
     find_front_running_patterns(&root_node, source, findings);
 }
@@ -51,6 +47,8 @@ fn find_front_running_patterns(
 
             if is_direct_approve && !has_allowance_check && !uses_safe_approve {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "front-running".to_string(),
                     severity: Severity::Medium,
                     confidence: Confidence::Medium,
                     line: node.start_position().row + 1,
@@ -59,6 +57,8 @@ fn find_front_running_patterns(
                     suggestion:
                         "Use increaseAllowance/decreaseAllowance or require current allowance is 0"
                             .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                     file: None,
                 });
             }
@@ -75,6 +75,8 @@ fn find_front_running_patterns(
 
             if !has_slippage {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "front-running".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
@@ -83,6 +85,8 @@ fn find_front_running_patterns(
                     suggestion:
                         "Add minAmountOut parameter and deadline for sandwich attack protection"
                             .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                     file: None,
                 });
             }
@@ -104,6 +108,8 @@ fn find_front_running_patterns(
 
             if !has_slippage {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "front-running".to_string(),
                     severity: Severity::High,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
@@ -114,6 +120,8 @@ fn find_front_running_patterns(
                     suggestion:
                         "Add minAmountOut parameter and deadline for sandwich attack protection"
                             .to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                     file: None,
                 });
             }
@@ -127,12 +135,16 @@ fn find_front_running_patterns(
 
             if !has_commit_reveal && func_text.contains("msg.value") {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "front-running".to_string(),
                     severity: Severity::Medium,
                     confidence: Confidence::Medium,
                     line: node.start_position().row + 1,
                     vulnerability_type: "Front-Runnable Auction".to_string(),
                     message: "Auction bid visible in mempool before execution".to_string(),
                     suggestion: "Implement commit-reveal scheme for blind bidding".to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                     file: None,
                 });
             }
@@ -152,6 +164,8 @@ fn find_front_running_patterns(
                 // Check if it's a limited mint
                 if func_text.contains("maxSupply") || func_text.contains("limit") {
                     findings.push(Finding {
+                        id: String::new(),
+                        detector_id: "front-running".to_string(),
                         severity: Severity::Low,
                         confidence: Confidence::Low,
                         line: node.start_position().row + 1,
@@ -160,6 +174,10 @@ fn find_front_running_patterns(
                             .to_string(),
                         suggestion: "Consider merkle proof whitelist or signature-based minting"
                             .to_string(),
+                        remediation: None,
+                        owasp_category: Some(
+                            "SC09:2025 - Denial of Service (DoS) Attacks".to_string(),
+                        ),
                         file: None,
                     });
                 }
@@ -175,12 +193,16 @@ fn find_front_running_patterns(
 
             if has_incentive {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "front-running".to_string(),
                     severity: Severity::Low,
                     confidence: Confidence::Low,
                     line: node.start_position().row + 1,
                     vulnerability_type: "Liquidation MEV".to_string(),
                     message: "Liquidation with bonus is attractive to MEV searchers".to_string(),
                     suggestion: "Consider using Flashbots Protect or MEV-aware design".to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC09:2025 - Denial of Service (DoS) Attacks".to_string()),
                     file: None,
                 });
             }

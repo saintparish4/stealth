@@ -5,11 +5,7 @@
 
 use crate::types::{Confidence, Finding, Severity};
 
-pub fn detect_unchecked_calls(
-    tree: &tree_sitter::Tree,
-    source: &str,
-    findings: &mut Vec<Finding>,
-) {
+pub fn detect_unchecked_calls(tree: &tree_sitter::Tree, source: &str, findings: &mut Vec<Finding>) {
     let root_node = tree.root_node();
     find_unchecked_calls(&root_node, source, findings);
 }
@@ -27,12 +23,16 @@ fn find_unchecked_calls(node: &tree_sitter::Node, source: &str, findings: &mut V
                 && !trimmed.contains("= ")
             {
                 findings.push(Finding {
+                    id: String::new(),
+                    detector_id: "unchecked-call".to_string(),
                     severity: Severity::Medium,
                     confidence: Confidence::High,
                     line: node.start_position().row + 1,
                     vulnerability_type: "Unchecked Call".to_string(),
                     message: "External call return value is not checked".to_string(),
                     suggestion: "Check the return value: (bool success, ) = addr.call(...); require(success);".to_string(),
+                    remediation: None,
+                    owasp_category: Some("SC04:2025 - Lack of Input Validation".to_string()),
                     file: None,
                 });
             }

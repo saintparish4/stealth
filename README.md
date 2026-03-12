@@ -8,53 +8,70 @@ A Solidity security scanner that detects common vulnerabilities through static a
 
 ## Why Stealth?
 
-I built Stealth to address false positives that plague other security scanners. Traditional tools flag legitimate DeFi patterns (like user withdrawals and staking) as vulnerabilities, creating noise that obscures real issues. Stealth understands modern smart contract patterns and provides accurate, actionable security insights.
-
----
-
-## Overview
-
-Stealth parses Solidity contracts and identifies security issues before deployment. It provides confidence levels to help you prioritize fixes and supports both single file and recursive directory scanning, with output in terminal or JSON formats for CI/CD integration.
-
-### What's New in v0.4.0
-
-- **13 Comprehensive Detectors**: Expanded from 7 to 13 vulnerability detectors covering modern DeFi attack vectors
-- **Self-Service Pattern Detection**: Automatically identifies user-operated functions (withdraw, claim, stake) to reduce false positives on access control checks
-- **Visibility-Aware Analysis**: Adjusts reentrancy confidence based on function visibility (private/internal functions are lower risk)
-- **Flash Loan Vulnerability Detection**: Identifies price manipulation and unvalidated callback patterns
-- **Front-Running Detection**: Catches missing slippage protection, approval race conditions, and front-runnable auctions
-- **DoS via Unbounded Loops**: Detects gas griefing patterns and external calls in loops
-- **Enhanced Detectors**: Improved accuracy across all vulnerability categories
-- **Context-Aware Heuristics**: Analysis that understands modern DeFi patterns
+I built Stealth to address the false positive problem that plagues other security scanners. Traditional tools flag legitimate DeFi patterns — user withdrawals, staking, claims — as vulnerabilities, creating noise that buries real issues. Stealth understands modern smart contract patterns and delivers accurate, actionable findings.
 
 ---
 
 ## Features
 
-| Category | Severity | Description | Enhancements |
-|----------|----------|-------------|--------------|
-| **Reentrancy Detection** | HIGH | Identifies external calls followed by state changes | Visibility-aware confidence scoring |
-| **Unchecked External Calls** | MEDIUM | Catches missing return value checks on `.call()` | High confidence pattern matching |
-| **tx.origin Authentication** | HIGH | Flags insecure use of `tx.origin` for access control | Definitive anti-pattern detection |
-| **Missing Access Control** | HIGH | Detects sensitive functions without auth checks | Self-service pattern recognition |
-| **Dangerous Delegatecall** | CRITICAL | Warns about user-controlled delegatecall targets | Parameter analysis for user control |
-| **Timestamp Dependence** | MEDIUM-HIGH | Flags dangerous timestamp patterns (modulo, equality) | View/pure function awareness |
-| **Unsafe Randomness** | HIGH | Detects use of block properties for randomness | Pattern-based detection (keccak256, blockhash) |
-| **Integer Overflow/Underflow** | HIGH | Detects unsafe arithmetic in Solidity <0.8 and unchecked blocks | Version-aware detection |
-| **Flash Loan Vulnerability** | HIGH | Identifies price manipulation and unvalidated callbacks | Spot price vs TWAP detection |
-| **Storage Collision (Proxy)** | CRITICAL-HIGH | Detects missing storage gaps and unprotected initializers | Upgradeable contract patterns |
-| **Front-Running Susceptibility** | MEDIUM-HIGH | Catches missing slippage protection, approval race conditions | Swap/withdraw pattern analysis |
-| **DoS via Unbounded Loops** | HIGH | Detects gas griefing and external calls in loops | Array iteration analysis |
-| **Unchecked ERC20 Return Values** | HIGH | Flags missing SafeERC20 usage | Transfer/approve pattern detection |
+### 13 Vulnerability Detectors
 
-**Smart Analysis Capabilities:**
-- **Self-Service Pattern Detection** - Understands DeFi patterns where users manage their own funds (withdraw, claim, stake) to avoid false positives
-- **Visibility-Aware Analysis** - Adjusts confidence based on function visibility (private/internal = lower risk)
-- **Confidence Scoring** - Each finding includes High/Medium/Low confidence with intelligent adjustments
-- **Recursive Scanning** - Analyze entire contract directories at once
-- **Multiple Output Formats** - Terminal (colored) or JSON for tooling integration
-- **CI/CD Ready** - Exit codes (0/1/2) for pipeline integration
-- **Fast Analysis** - Built with Rust for maximum performance
+| Detector | `detector_id` | Severity | OWASP SC Top 10 |
+|----------|---------------|----------|-----------------|
+| **Reentrancy** | `reentrancy` | HIGH | SC02 - Reentrancy Attacks |
+| **Unchecked External Calls** | `unchecked-call` | MEDIUM | SC04 - Lack of Input Validation |
+| **tx.origin Authentication** | `tx-origin` | HIGH | SC01 - Access Control Vulnerabilities |
+| **Missing Access Control** | `access-control` | HIGH | SC01 - Access Control Vulnerabilities |
+| **Dangerous Delegatecall** | `dangerous-delegatecall` | CRITICAL | SC01 - Access Control Vulnerabilities |
+| **Timestamp Dependence** | `timestamp-dependence` | MEDIUM-HIGH | SC06 - Unsafe Randomness and Predictability |
+| **Unsafe Randomness** | `unsafe-randomness` | HIGH | SC06 - Unsafe Randomness and Predictability |
+| **Integer Overflow/Underflow** | `integer-overflow` | HIGH | SC03 - Integer Overflow and Underflow |
+| **Flash Loan Vulnerability** | `flash-loan` | HIGH | SC07 - Flash Loan Attacks |
+| **Storage Collision (Proxy)** | `storage-collision` | CRITICAL-HIGH | SC08 - Insecure Smart Contract Composition |
+| **Front-Running Susceptibility** | `front-running` | MEDIUM-HIGH | SC09 - Denial of Service (DoS) Attacks |
+| **DoS via Unbounded Loops** | `dos-loops` | HIGH | SC09 - Denial of Service (DoS) Attacks |
+| **Unchecked ERC20 Return Values** | `unchecked-erc20` | HIGH | SC04 - Lack of Input Validation |
+
+### Smart Analysis Capabilities
+
+- **Self-Service Pattern Detection** — Recognizes DeFi patterns where users manage their own funds (`withdraw`, `claim`, `stake`) to avoid false positives on access control checks
+- **Visibility-Aware Analysis** — Adjusts confidence based on function visibility (`private`/`internal` functions carry lower reentrancy risk)
+- **Confidence Scoring** — Every finding includes High/Medium/Low confidence with contextual adjustments
+- **Inline Suppression** — `// stealth-ignore: <rule>` comments silence specific findings at the source
+- **Baseline Diffing** — Report only new findings against a known-good snapshot; ideal for CI ratchets
+- **SARIF 2.1.0 Output** — Native SARIF for GitHub Code Scanning integration
+
+---
+
+## Project Structure
+
+```
+/core/              Rust scanner engine (binary + library)
+  /src/
+    /detectors/     13 vulnerability detectors (separate files)
+    helpers.rs      Self-service + visibility utilities
+    suppression.rs  Inline ignore + baseline filtering
+    scan.rs         File and directory scanning
+    output.rs       Terminal, JSON, and SARIF formatters
+    types.rs        Finding, Severity, Confidence types
+    lsp.rs          LSP server implementation (tower-lsp)
+    lsp_main.rs     stealth-lsp binary entry point
+    wasm.rs         WASM bindings (wasm-bindgen, future use)
+    lib.rs          Library crate, feature-gated exports
+    main.rs         stealth CLI binary entry point
+  /contracts/       Example Solidity contracts for tests
+/vscode-ext/        VS Code extension (LSP client)
+  /src/
+    extension.ts    Spawns stealth-lsp, registers diagnostics
+/web/               Next.js web interface
+  /app/             Pages, API routes, components
+  /bin/             CI-built scanner binary (legacy name: vanguard)
+/docs/              Technical documentation
+  WASM_SIZE.md      WASM compilation investigation and LSP decision
+/.github/
+  /workflows/
+    deploy.yml      Builds Rust binary and updates web/bin
+```
 
 ---
 
@@ -62,45 +79,45 @@ Stealth parses Solidity contracts and identifies security issues before deployme
 
 | Technology | Purpose |
 |------------|---------|
-| **Rust** | Core scanner engine (performance & safety) |
-| **Cargo** | Build system & package manager |
-| **Solidity** | Target language for vulnerability detection |
-| **Next.js** | Web interface for the scanner |
-| **Vercel** | Hosting platform for web application |
-| **GitHub Actions** | CI/CD workflow support |
+| **Rust** | Core scanner engine and LSP server |
+| **tree-sitter** | Solidity AST parsing |
+| **tower-lsp / tokio** | LSP server (VS Code extension backend) |
+| **wasm-bindgen** | WASM bindings (future web migration) |
+| **Next.js 16 / React 19** | Web interface |
+| **Vercel** | Web app hosting |
+| **GitHub Actions** | CI/CD |
 
 ---
 
 ## Installation
 
-### Install from crates.io (Recommended)
+### From crates.io
 
 ```bash
-# Install the latest version from crates.io
 cargo install stealth-scanner
 
-# After installation, use the 'stealth' command
+# Use the installed binary
 stealth scan ./contracts --recursive
 ```
 
-### Install from Source
+### From Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/saintparish4/stealth.git
-cd stealth
-
-# Build from source
-cd core
+cd stealth/core
 cargo build --release
 
-# The binary will be at core/target/release/stealth
-
-# Optional: Install globally from source
+# Binary at: core/target/release/stealth
+# Optionally install globally:
 cargo install --path .
+```
 
-# After installation, you can use 'stealth' command directly
-stealth scan ./contracts --recursive
+### Build the LSP Server (for VS Code extension)
+
+```bash
+cd core
+cargo build --release --features lsp --no-default-features
+# Binary at: core/target/release/stealth-lsp
 ```
 
 ---
@@ -110,106 +127,61 @@ stealth scan ./contracts --recursive
 ### Basic Scanning
 
 ```bash
-# Using cargo run (development)
-cd core
-
 # Scan a single file
-cargo run --release -- scan contracts/reentrancy-vulnerable.sol
+stealth scan contracts/token.sol
 
 # Scan a directory recursively
-cargo run --release -- scan contracts --recursive
-
-# Get JSON output
-cargo run --release -- scan contracts/reentrancy-vulnerable.sol --format json
-
-# Scan directory with JSON output
-cargo run --release -- scan contracts --recursive --format json > results.json
-
-# Using installed binary (after cargo install)
-stealth scan contracts/reentrancy-vulnerable.sol
 stealth scan contracts --recursive
+
+# JSON output
 stealth scan contracts --recursive --format json > results.json
 
-# Using Make (recommended)
-make scan                                    # Scan contracts/ directory
-make scan FILE=core/contracts/reentrancy-vulnerable.sol
-make scan FILE=core/contracts
-make scan-debug                              # Faster compilation for testing
-```
+# SARIF output (for GitHub Code Scanning)
+stealth scan contracts --recursive --format sarif > results.sarif
 
-### CI/CD Integration
-
-Stealth provides exit codes for CI/CD pipelines:
-
-| Exit Code | Meaning |
-|-----------|---------|
-| `0` | No vulnerabilities found |
-| `1` | Non-critical vulnerabilities found |
-| `2` | Critical vulnerabilities found |
-
-```bash
-# In your CI/CD script
+# Using cargo run (development)
 cd core
-cargo run --release -- scan contracts --recursive --format json
-
-EXIT_CODE=$?
-
-if [ $EXIT_CODE -eq 2 ]; then
-  echo "Critical vulnerabilities found! Blocking deployment."
-  exit 1
-fi
+cargo run --release -- scan contracts --recursive
 ```
 
-### GitHub Actions
-
-See `.github/workflows/stealth-security-scan.yml` for a complete example.
-
-```yaml
-- name: Run Stealth Scan
-  run: |
-    cd core
-    cargo run --release -- scan ./contracts --recursive --format json
-```
-
-### Output Formats
-
-**Terminal (default):**
+### Make Commands
 
 ```bash
-cd core
-cargo run --release -- scan contracts/comprehensive-vulnerabilities.sol
+make scan                                    # Scan core/contracts/
+make scan FILE=core/contracts/token.sol      # Scan a specific file
+make scan-debug                              # Debug build (faster recompile)
+make build-release                           # Optimized release build
+make verify                                  # Release build + verify.sh
 ```
 
-Clean, colored output with statistics summary.
+### Command-Line Reference
 
-**JSON:**
-
-```bash
-cd core
-cargo run --release -- scan contracts/comprehensive-vulnerabilities.sol --format json
 ```
-
-Machine-readable format for tool integration.
-
-### Command-line Options
-
-```bash
 stealth scan [PATH] [OPTIONS]
 
 Arguments:
   <PATH>  Path to Solidity file or directory
 
 Options:
-  -f, --format <FORMAT>      Output format: terminal or json [default: terminal]
-  -r, --recursive           Recursively scan directories
-  --baseline <FILE>         Only report findings not in baseline JSON (CI fails on new only)
-  -h, --help                Print help
-  -V, --version             Print version
+  -f, --format <FORMAT>    Output format: terminal, json, sarif [default: terminal]
+  -r, --recursive          Recursively scan directories
+      --baseline <FILE>    Only report findings not in baseline JSON
+  -h, --help               Print help
+  -V, --version            Print version
 ```
 
-### Suppression and baseline
+### Exit Codes
 
-**Inline suppression** — Add a comment on or above the line you want to ignore:
+| Code | Meaning |
+|------|---------|
+| `0` | No findings |
+| `1` | Low or medium severity findings only |
+| `2` | High severity findings (may also have low/medium) |
+| `3` | Critical severity findings (may also have any lower) |
+
+### Suppression
+
+Silence a specific finding inline:
 
 ```solidity
 // stealth-ignore: reentrancy
@@ -219,106 +191,124 @@ Options:
 require(tx.origin == owner);
 ```
 
-You can target a specific line with `L<line>` (e.g. `// stealth-ignore: reentrancy L42`). Type matching is case-insensitive.
+Target a specific line with `L<line>`: `// stealth-ignore: reentrancy L42`. Rule names are case-insensitive.
 
-**Baseline** — To fail CI only when *new* findings appear, capture a baseline once, then pass it on subsequent runs:
+### Baseline Diffing
+
+Fail CI only when *new* findings appear:
 
 ```bash
-# Capture current findings as baseline (run from repo root or same path you'll use in CI)
-cd core
-cargo run --release -- scan ./contracts --recursive --format json > baseline.json
+# 1. Capture a baseline from the current known state
+stealth scan ./contracts --recursive --format json > baseline.json
 
-# Later: only report findings not in baseline (exit 0 if no new findings)
-cargo run --release -- scan ./contracts --recursive --baseline baseline.json
+# 2. In CI: only new findings are reported; exit 0 if nothing new
+stealth scan ./contracts --recursive --baseline baseline.json
 ```
 
 ---
 
-## Testing
+## Output Formats
 
-### Run the test suite
+**Terminal (default)** — Colored, human-readable output with a statistics summary.
 
-From the `core` directory:
-
-```bash
-cd core
-cargo test
-```
-
-Run only detector or suppression tests:
+**JSON** — Machine-readable for tool integration:
 
 ```bash
-cargo test detector_
-cargo test suppression_
+stealth scan contracts --recursive --format json
 ```
 
-### Manually test inline suppression
+**SARIF 2.1.0** — For GitHub Code Scanning:
 
-1. Scan a file that has a known finding (e.g. reentrancy):
+```bash
+stealth scan contracts --recursive --format sarif > results.sarif
+```
+
+Upload to GitHub:
+
+```yaml
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+---
+
+## VS Code Extension
+
+The `vscode-ext/` directory contains a VS Code extension that provides inline Solidity diagnostics powered by an LSP server (`stealth-lsp`).
+
+### How it works
+
+The extension spawns `stealth-lsp` as a subprocess and communicates over stdio. On every file open and save, the LSP server scans the document and publishes diagnostics back to the editor.
+
+### Setup
+
+1. Build `stealth-lsp` and place it on your PATH (or configure `stealth.binaryPath`):
 
    ```bash
    cd core
-   cargo run --release -- scan contracts/comprehensive-vulnerabilities.sol
+   cargo build --release --features lsp --no-default-features
+   # Copy core/target/release/stealth-lsp to somewhere on your PATH
    ```
 
-   Note the line number of a finding (e.g. Reentrancy at line 19).
-
-2. Add `// stealth-ignore: reentrancy` on the line above that finding in the contract (or on the same line as the reported code).
-
-3. Scan again; that finding should no longer appear.
-
-### Manually test baseline
-
-1. Create a baseline from current scan results:
+2. Install the extension from the marketplace (or install the `.vsix` locally):
 
    ```bash
-   cd core
-   cargo run --release -- scan contracts/comprehensive-vulnerabilities.sol --format json > baseline.json
+   cd vscode-ext
+   npm install
+   npm run package        # produces stealth-scanner-*.vsix
+   code --install-extension stealth-scanner-*.vsix
    ```
 
-2. Run again with `--baseline baseline.json`: the same file’s findings are now treated as “known”, so **no findings** are reported and exit code is 0.
+### Settings
 
-3. Add a new vulnerability to the contract (or scan a different file that has issues). Run with `--baseline baseline.json`: only findings **not** in the baseline are reported, and the exit code reflects only those new issues.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `stealth.binaryPath` | `""` | Path to `stealth-lsp`. Empty = use PATH. |
+| `stealth.scanOnSave` | `true` | Auto-scan on file save. |
+| `stealth.minimumSeverity` | `Low` | Minimum severity to report (`Critical`, `High`, `Medium`, `Low`). |
 
----
-
-## Limitations
-
-Stealth focuses on detecting common vulnerability patterns through static analysis. It does not:
-
-- Perform symbolic execution or formal verification
-- Analyze complex business logic vulnerabilities
-- Detect all possible attack vectors (no tool can)
-- Replace professional security audits
-
-For production deployments, I recommend using Stealth alongside professional audits and comprehensive testing.
+> **Note on WASM:** WASM compilation is currently blocked by tree-sitter's C dependencies. The extension uses the LSP subprocess approach instead. See [`docs/WASM_SIZE.md`](docs/WASM_SIZE.md) for details.
 
 ---
 
-## Contributing
+## CI/CD Integration
 
-Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
+### GitHub Actions (inline)
+
+```yaml
+- name: Run Stealth Scan
+  run: |
+    cd core
+    cargo build --release
+    ./target/release/stealth scan ./contracts --recursive --format sarif > results.sarif
+
+- name: Upload SARIF to GitHub Security
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+Block on critical findings:
+
+```bash
+stealth scan ./contracts --recursive
+EXIT=$?
+if [ $EXIT -ge 3 ]; then
+  echo "Critical vulnerabilities found. Blocking deploy."
+  exit 1
+elif [ $EXIT -ge 2 ]; then
+  echo "High severity findings detected."
+  exit 1
+fi
+```
 
 ---
 
 ## Web Interface
 
-Stealth includes a modern web interface built with Next.js. The web app bundles the scanner binary under the **legacy name `vanguard`** (e.g. `web/bin/vanguard`); the CLI and docs use the name **Stealth**. Both refer to the same scanner.
-
-The web application provides:
-
-- Interactive code editor with syntax highlighting
-- Real-time vulnerability scanning
-- Beautiful results visualization
-- Easy sharing of scan results
-
-### Deployment
-
-The web application is deployed on Vercel. For deployment instructions, see:
-- `web/DEPLOYMENT.md` - Complete deployment guide
-- `web/QUICK_START.md` - Quick reference for common tasks
-
-### Local Development
+The web app at `web/` provides a browser-based scanner with a Monaco code editor, real-time scan results, and syntax-highlighted output.
 
 ```bash
 cd web
@@ -327,14 +317,73 @@ npm run dev
 # Open http://localhost:3000
 ```
 
-### Production Deployment
+**Deployment:**
 
 ```bash
 cd web
 vercel --prod
 ```
 
-The web application automatically includes the Rust scanner binary, which is built and bundled during the CI/CD process.
+For deployment notes, see the `web/` directory.
+
+> **`web/bin/vanguard`** — The CI workflow builds the Rust scanner binary and commits it here under the legacy name `vanguard`. The CLI and docs use the name **Stealth**; both refer to the same binary. This pattern is being replaced by GitHub Releases + WASM in a future release.
+
+---
+
+## Testing
+
+```bash
+# All tests
+cd core
+cargo test
+
+# Filter to detector or suppression tests
+cargo test detector_
+cargo test suppression_
+
+# Full verification (release build + verify.sh)
+make verify
+```
+
+---
+
+## Building with Feature Flags
+
+| Feature | What it enables |
+|---------|----------------|
+| `cli` (default) | `stealth` binary: terminal colors, file I/O, directory walking |
+| `lsp` | `stealth-lsp` binary: LSP server via tower-lsp + tokio |
+| `wasm` | WASM bindings via wasm-bindgen (currently blocked, see `docs/WASM_SIZE.md`) |
+
+```bash
+# CLI only (default)
+cargo build --release
+
+# LSP server only
+cargo build --release --features lsp --no-default-features
+
+# Both CLI and LSP
+cargo build --release --features cli,lsp
+```
+
+---
+
+## Limitations
+
+Stealth performs static analysis only. It does not:
+
+- Execute symbolic execution or formal verification
+- Analyze complex business logic vulnerabilities
+- Detect every possible attack vector
+- Replace a professional security audit
+
+For production deployments, use Stealth alongside comprehensive testing and a professional audit.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for code style, commit message conventions, and the PR process.
 
 ---
 

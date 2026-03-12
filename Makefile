@@ -1,10 +1,10 @@
-.PHONY: help build build-release fmt run scan scan-debug verify clean test
+.PHONY: help build build-release check fmt clippy run scan scan-debug verify clean test test-unit test-integration
 
 # Variables
 CARGO = cargo
 CORE_DIR = core
-SCANNER = $(CORE_DIR)/target/release/core
-SCANNER_DEBUG = $(CORE_DIR)/target/debug/core
+SCANNER = $(CORE_DIR)/target/release/stealth
+SCANNER_DEBUG = $(CORE_DIR)/target/debug/stealth
 CONTRACTS_DIR = $(CORE_DIR)/contracts
 
 # Default target
@@ -14,6 +14,7 @@ help:
 	@echo "Available targets:"
 	@echo "  make build          - Build in debug mode"
 	@echo "  make build-release  - Build in release mode (optimized)"
+	@echo "  make check          - Type-check without building (fast)"
 	@echo "  make fmt            - Format code with cargo fmt"
 	@echo "  make run            - Run scanner with default args"
 	@echo "  make scan [FILE=...]  - Scan a Solidity file or directory (release build)"
@@ -41,6 +42,11 @@ build:
 build-release:
 	@echo "Building in release mode..."
 	cd $(CORE_DIR) && $(CARGO) build --release
+
+# Check target (type-check without producing binaries)
+check:
+	@echo "Running cargo check..."
+	cd $(CORE_DIR) && $(CARGO) check
 
 # Format target
 fmt:
@@ -88,12 +94,25 @@ scan-debug: build
 		$(CARGO) run -- scan $(FILE); \
 	fi
 
+# Lint target
+clippy:
+	@echo "Running clippy..."
+	cd $(CORE_DIR) && $(CARGO) clippy -- -D warnings
+
 # Test/Verify targets
+test-unit:
+	@echo "Running unit tests..."
+	cd $(CORE_DIR) && $(CARGO) test
+
+test-integration: build-release
+	@echo "Running integration tests..."
+	cd $(CORE_DIR) && $(CARGO) test --test cli_integration --test snapshots
+
 verify: build-release
 	@echo "Running verification tests..."
 	cd $(CORE_DIR) && bash verify.sh
 
-test: verify
+test: test-unit
 
 # Clean target
 clean:

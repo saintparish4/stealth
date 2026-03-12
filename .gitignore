@@ -3,6 +3,9 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Tests
+core/tests/snapshots/
+
 # Cargo
 # Cargo.lock should be committed for binary projects (like this one)
 # Uncomment the line below if this becomes a library project
@@ -71,3 +74,8 @@ stealth.yml
 # Not ready to use yet
 .pre-commit-config.yaml
 CHANGELOG.md
+WASM_AND_VSCODE_IMPLEMENTATION.txt
+
+# Personal
+book/
+cmd/
