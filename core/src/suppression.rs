@@ -48,8 +48,14 @@ pub fn parse_stealth_ignores(source: &str) -> Vec<(usize, Option<String>)> {
 }
 
 /// Returns true if this finding is suppressed by a pre-parsed set of inline ignores.
+///
+/// Matches the ignore rule against **both** `finding.detector_id` and
+/// `finding.vulnerability_type` so that users can write either:
+///   `// stealth-ignore: tx-origin`  (detector_id)
+///   `// stealth-ignore: Reentrancy` (vulnerability_type)
 fn is_suppressed(ignores: &[(usize, Option<String>)], finding: &Finding) -> bool {
     let type_norm = normalize_vuln_type(&finding.vulnerability_type);
+    let id_norm = normalize_vuln_type(&finding.detector_id);
     for (ignored_line, type_opt) in ignores {
         if *ignored_line != finding.line {
             continue;
@@ -57,8 +63,12 @@ fn is_suppressed(ignores: &[(usize, Option<String>)], finding: &Finding) -> bool
         match type_opt {
             None => return true,
             Some(t) if t.is_empty() => return true,
-            Some(t) if normalize_vuln_type(t) == type_norm => return true,
-            _ => {}
+            Some(t) => {
+                let t_norm = normalize_vuln_type(t);
+                if t_norm == type_norm || t_norm == id_norm {
+                    return true;
+                }
+            }
         }
     }
     false
@@ -136,4 +146,166 @@ pub fn filter_findings_by_baseline(
             !baseline_set.contains(&key)
         })
         .collect()
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Confidence, Severity};
+
+    fn make_finding(detector_id: &str, vuln_type: &str, line: usize) -> Finding {
+        Finding {
+            id: String::new(),
+            detector_id: detector_id.to_string(),
+            severity: Severity::High,
+            confidence: Confidence::High,
+            line,
+            vulnerability_type: vuln_type.to_string(),
+            message: String::new(),
+            suggestion: String::new(),
+            remediation: None,
+            owasp_category: None,
+            file: None,
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // parse_stealth_ignores
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn parse_ignores_bare_suppression() {
+        let src = "// stealth-ignore:\nuint x = 1;";
+        let ignores = parse_stealth_ignores(src);
+        assert!(ignores.iter().any(|(line, t)| *line == 1 && t.is_none()));
+        assert!(ignores.iter().any(|(line, t)| *line == 2 && t.is_none()));
+    }
+
+    #[test]
+    fn parse_ignores_typed_suppression() {
+        let src = "// stealth-ignore: reentrancy\nuint x = 1;";
+        let ignores = parse_stealth_ignores(src);
+        assert!(ignores.iter().any(|(line, t)| *line == 2 && t.as_deref() == Some("reentrancy")));
+    }
+
+    #[test]
+    fn parse_ignores_with_target_line() {
+        let src = "// stealth-ignore: tx-origin L5";
+        let ignores = parse_stealth_ignores(src);
+        assert!(ignores.iter().any(|(line, t)| *line == 5 && t.as_deref() == Some("tx origin")));
+    }
+
+    #[test]
+    fn parse_ignores_skips_non_comments() {
+        let src = "uint x = 1;\nfunction foo() {}";
+        let ignores = parse_stealth_ignores(src);
+        assert!(ignores.is_empty());
+    }
+
+    // ---------------------------------------------------------------
+    // is_suppressed — matching against vulnerability_type
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn suppressed_by_vulnerability_type() {
+        let finding = make_finding("reentrancy", "Reentrancy", 5);
+        let ignores = vec![(5, Some("reentrancy".to_string()))];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn not_suppressed_wrong_line() {
+        let finding = make_finding("reentrancy", "Reentrancy", 5);
+        let ignores = vec![(10, Some("reentrancy".to_string()))];
+        assert!(!is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn not_suppressed_wrong_type() {
+        let finding = make_finding("reentrancy", "Reentrancy", 5);
+        let ignores = vec![(5, Some("tx origin".to_string()))];
+        assert!(!is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn suppressed_bare_ignore_matches_everything() {
+        let finding = make_finding("reentrancy", "Reentrancy", 5);
+        let ignores = vec![(5, None)];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn suppressed_empty_type_matches_everything() {
+        let finding = make_finding("reentrancy", "Reentrancy", 5);
+        let ignores = vec![(5, Some(String::new()))];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    // ---------------------------------------------------------------
+    // is_suppressed — matching against detector_id (bug fix)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn suppressed_by_detector_id_tx_origin() {
+        let finding = make_finding("tx-origin", "tx.origin Authentication", 10);
+        let ignores = vec![(10, Some("tx origin".to_string()))];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn suppressed_by_detector_id_unchecked_calls() {
+        let finding = make_finding("unchecked-calls", "Unchecked External Call Return Values", 3);
+        let ignores = vec![(3, Some("unchecked calls".to_string()))];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn suppressed_by_detector_id_reentrancy() {
+        let finding = make_finding("reentrancy", "Reentrancy", 7);
+        let ignores = vec![(7, Some("reentrancy".to_string()))];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    #[test]
+    fn suppressed_still_works_via_vulnerability_type() {
+        let finding = make_finding("reentrancy", "Reentrancy", 7);
+        let ignores = vec![(7, Some("reentrancy".to_string()))];
+        assert!(is_suppressed(&ignores, &finding));
+    }
+
+    // ---------------------------------------------------------------
+    // filter_findings_by_inline_ignores (integration)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn filter_suppresses_by_detector_id_in_source() {
+        let source = "some code\n// stealth-ignore: tx-origin\nrequire(tx.origin == msg.sender);";
+        let findings = vec![make_finding("tx-origin", "tx.origin Authentication", 3)];
+        let filtered = filter_findings_by_inline_ignores(findings, source);
+        assert!(filtered.is_empty(), "finding should be suppressed by detector_id");
+    }
+
+    #[test]
+    fn filter_suppresses_by_vulnerability_type_in_source() {
+        let source = "some code\n// stealth-ignore: Reentrancy\nexternal_call();";
+        let findings = vec![make_finding("reentrancy", "Reentrancy", 3)];
+        let filtered = filter_findings_by_inline_ignores(findings, source);
+        assert!(filtered.is_empty(), "finding should be suppressed by vulnerability_type");
+    }
+
+    #[test]
+    fn filter_keeps_unsuppressed_findings() {
+        let source = "some code\n// stealth-ignore: tx-origin\nrequire(tx.origin == msg.sender);";
+        let findings = vec![
+            make_finding("tx-origin", "tx.origin Authentication", 3),
+            make_finding("reentrancy", "Reentrancy", 3),
+        ];
+        let filtered = filter_findings_by_inline_ignores(findings, source);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].detector_id, "reentrancy");
+    }
 }

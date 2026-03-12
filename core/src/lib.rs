@@ -4,6 +4,7 @@
 //! Module:  lsp (LSP-only — requires `lsp` feature).
 //! Module:  wasm (WASM-only — requires `wasm` feature).
 
+pub mod ast_utils;
 pub mod detector_trait;
 pub mod detectors;
 pub mod helpers;
