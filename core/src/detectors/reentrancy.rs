@@ -1,8 +1,9 @@
 //! Detector: Reentrancy vulnerabilities.
 //!
 //! Flags external calls (`.call`, `.transfer`, `.send`) followed by state changes
-//! without a reentrancy guard modifier. Uses AST traversal to identify call nodes
-//! and assignment expressions, avoiding false positives from comments/strings.
+//! without a reentrancy guard modifier. Uses CFG-based taint when available
+//! (sources=ExternalCall, sinks=StateWrite, sanitizers=Guard); falls back to
+//! line-number ordering when cfg_for returns None.
 
 use crate::ast_utils::{
     find_nodes_of_kind, func_body, function_visibility, has_reentrancy_guard, is_external_call,
@@ -10,6 +11,7 @@ use crate::ast_utils::{
 };
 use crate::detector_trait::{AnalysisContext, Detector};
 use crate::helpers::visibility_adjusted_confidence;
+use crate::taint::{find_taint_violations, CfgStatementKind, TaintQuery};
 use crate::types::{Confidence, Finding, Severity};
 
 pub struct ReentrancyDetector;
@@ -33,12 +35,42 @@ impl Detector for ReentrancyDetector {
                 continue;
             }
 
+            let visibility = function_visibility(func, ctx.source);
+
+            // Prefer CFG taint when available (handles branches, early returns, modifier bodies).
+            if let Some(cfg_ref) = ctx.cfg_for(func) {
+                let query = TaintQuery {
+                    sources: vec![CfgStatementKind::ExternalCall],
+                    sinks: vec![CfgStatementKind::StateWrite],
+                    sanitizers: vec![CfgStatementKind::Guard],
+                };
+                for v in find_taint_violations(&cfg_ref, &query) {
+                    let adjusted = visibility_adjusted_confidence(Confidence::High, visibility);
+                    let visibility_note = if !visibility.is_externally_callable() {
+                        format!(" ({} function - lower risk)", visibility.as_str())
+                    } else {
+                        String::new()
+                    };
+                    findings.push(Finding::from_detector(
+                        self,
+                        v.source_line,
+                        adjusted,
+                        "Reentrancy",
+                        format!(
+                            "External call at line {}, state change at line {}{}",
+                            v.source_line, v.sink_line, visibility_note
+                        ),
+                        "Move state changes before external call, or add nonReentrant modifier",
+                    ));
+                }
+                continue;
+            }
+
+            // Fallback: line-number ordering when CFG is not available.
             let body = match func_body(func) {
                 Some(b) => b,
                 None => continue,
             };
-
-            let visibility = function_visibility(func, ctx.source);
 
             let calls = find_nodes_of_kind(&body, "call_expression");
             let mut earliest_external_call_line: Option<usize> = None;
@@ -57,7 +89,6 @@ impl Detector for ReentrancyDetector {
                 None => continue,
             };
 
-            // Look for state writes AFTER the external call
             let assignments = find_nodes_of_kind(&body, "assignment_expression");
             let augmented = find_nodes_of_kind(&body, "augmented_assignment_expression");
 

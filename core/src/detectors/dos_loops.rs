@@ -3,12 +3,9 @@
 //! Flags unbounded iteration over dynamic arrays, external calls inside loops,
 //! growing arrays, and expensive delete operations in loops.
 //!
-//! Uses tree-sitter AST node traversal exclusively:
-//! - `for_statement` / `while_statement` nodes for loop detection
-//! - `member_expression` nodes with `.length` for array-length iteration
-//! - `call_expression` nodes + `is_external_call` for external call detection
-//! - `assignment_expression` + `is_state_write` for storage write detection
-//! - `unary_expression` with `delete` operator for delete detection
+//! Uses CFG back-edge detection when available: identify back edges, then check if
+//! the loop body contains ExternalCall nodes. Falls back to AST-based loop detection
+//! (for_statement / while_statement + call_expression, etc.) when cfg_for returns None.
 
 use crate::ast_utils::{
     find_nodes_of_kind, func_body, function_name, function_visibility, get_call_target,
@@ -82,7 +79,10 @@ fn has_iteration_bound(loop_node: &Node, source: &str) -> bool {
 fn has_delete_expression(node: &Node, source: &str) -> bool {
     find_nodes_of_kind(node, "unary_expression")
         .iter()
-        .any(|n| n.child(0).is_some_and(|op| node_text(&op, source) == "delete"))
+        .any(|n| {
+            n.child(0)
+                .is_some_and(|op| node_text(&op, source) == "delete")
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -111,30 +111,51 @@ impl Detector for DosLoopsDetector {
             }
 
             let name = function_name(func, ctx.source).unwrap_or("");
+            let line = func.start_position().row + 1;
+
             let body = match func_body(func) {
                 Some(b) => b,
                 None => continue,
             };
-            let line = func.start_position().row + 1;
 
-            // --- Patterns 1, 3, 4: inside loop bodies ---
+            // --- Pattern 3 (CFG path): External call in loop via back-edge detection ---
+            let used_cfg_for_ext_call = if let Some(cfg_ref) = ctx.cfg_for(func) {
+                for (tail, head) in cfg_ref.back_edges() {
+                    let loop_blocks = cfg_ref.loop_blocks_for_back_edge(tail, head);
+                    if cfg_ref.blocks_contain_external_call(&loop_blocks) {
+                        findings.push(Finding {
+                            id: String::new(),
+                            detector_id: self.id().to_string(),
+                            severity: Severity::High,
+                            confidence: Confidence::High,
+                            line,
+                            vulnerability_type: "External Call in Loop".to_string(),
+                            message: "External calls in loop - single failure can revert entire transaction"
+                                .to_string(),
+                            suggestion: "Use pull-over-push pattern: let users withdraw instead of pushing to them"
+                                .to_string(),
+                            remediation: None,
+                            owasp_category: self.owasp_category().map(|s| s.to_string()),
+                            file: None,
+                        });
+                    }
+                }
+                true
+            } else {
+                false
+            };
 
+            // --- Patterns 1, 3 (AST fallback), 4: inside loop bodies (AST) ---
             let for_loops = find_nodes_of_kind(&body, "for_statement");
             let while_loops = find_nodes_of_kind(&body, "while_statement");
 
             for loop_node in for_loops.iter().chain(while_loops.iter()) {
-                // Use the loop body if extractable; fall back to the whole loop node
-                // so we don't silently skip single-statement loops.
                 let search_node = loop_body(loop_node).unwrap_or(*loop_node);
 
-                // Classify what's inside the loop body using AST nodes
                 let loop_calls = find_nodes_of_kind(&search_node, "call_expression");
-                let has_external_call = loop_calls
-                    .iter()
-                    .any(|c| is_external_call(c, ctx.source));
+                let has_external_call = loop_calls.iter().any(|c| is_external_call(c, ctx.source));
 
-                let loop_assigns =
-                    find_nodes_of_kind(&search_node, "assignment_expression");
+                let loop_assigns = find_nodes_of_kind(&search_node, "assignment_expression");
                 let loop_aug_assigns =
                     find_nodes_of_kind(&search_node, "augmented_assignment_expression");
                 let has_storage_write = loop_assigns
@@ -144,8 +165,7 @@ impl Detector for DosLoopsDetector {
 
                 let has_delete = has_delete_expression(&search_node, ctx.source);
 
-                // Pattern 1: Unbounded array iteration (`.length` in condition,
-                // no bound identifier, and something costly in the body)
+                // Pattern 1: Unbounded array iteration
                 if has_length_access(loop_node, ctx.source)
                     && !has_iteration_bound(loop_node, ctx.source)
                 {
@@ -175,8 +195,8 @@ impl Detector for DosLoopsDetector {
                     });
                 }
 
-                // Pattern 3: Any external call inside a loop body
-                if has_external_call {
+                // Pattern 3 (AST fallback): external call in loop only when we didn't use CFG
+                if !used_cfg_for_ext_call && has_external_call {
                     findings.push(Finding {
                         id: String::new(),
                         detector_id: self.id().to_string(),
@@ -233,8 +253,8 @@ impl Detector for DosLoopsDetector {
                     line,
                     vulnerability_type: "Growing Array".to_string(),
                     message: "Array grows unbounded - iteration may exceed gas limit".to_string(),
-                    suggestion:
-                        "Use mapping instead of array, or implement cleanup mechanism".to_string(),
+                    suggestion: "Use mapping instead of array, or implement cleanup mechanism"
+                        .to_string(),
                     remediation: None,
                     owasp_category: self.owasp_category().map(|s| s.to_string()),
                     file: None,
@@ -280,9 +300,14 @@ contract C {
 }"#;
         let findings = run(src);
         assert!(
-            findings.iter().any(|f| f.vulnerability_type == "External Call in Loop"),
+            findings
+                .iter()
+                .any(|f| f.vulnerability_type == "External Call in Loop"),
             "expected External Call in Loop finding; got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -304,7 +329,10 @@ contract C {
                 .iter()
                 .any(|f| f.vulnerability_type == "Unbounded Loop"),
             "expected Unbounded Loop; got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -323,7 +351,10 @@ contract C {
                 .iter()
                 .any(|f| f.vulnerability_type == "Growing Array"),
             "expected Growing Array; got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -344,7 +375,10 @@ contract C {
                 .iter()
                 .any(|f| f.vulnerability_type == "Expensive Loop Operation"),
             "expected Expensive Loop Operation; got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 

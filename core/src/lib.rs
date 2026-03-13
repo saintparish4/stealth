@@ -5,12 +5,14 @@
 //! Module:  wasm (WASM-only — requires `wasm` feature).
 
 pub mod ast_utils;
+pub mod cfg;
 pub mod detector_trait;
 pub mod detectors;
 pub mod helpers;
 pub mod output;
 pub mod scan;
 pub mod suppression;
+pub mod taint;
 pub mod types;
 
 #[cfg(feature = "lsp")]

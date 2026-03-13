@@ -4,11 +4,9 @@
 //! delegatecall, ownership changes, etc.) or allow arbitrary fund transfers without
 //! access-control modifiers or `require(msg.sender == ...)` checks.
 //!
-//! Uses tree-sitter AST node traversal exclusively:
-//! - `call_expression` nodes + `get_call_target` for sensitive operation detection
-//!   (replaces the 16-keyword `body_text.to_lowercase().contains(...)` string scan)
-//! - `parameter_list` + `parameter` nodes for arbitrary-recipient detection
-//!   (replaces `func_text.contains("address to")` string scan)
+//! Uses CFG taint when available: sources=entry block, sinks=StateWrite/InternalCall(sensitive),
+//! sanitizers=Guard — verifies all paths to sensitive operations pass through an access check.
+//! Falls back to AST-based sensitive-operation and parameter checks when cfg_for returns None.
 
 use crate::ast_utils::{
     find_nodes_of_kind, func_body, function_name, function_visibility, get_call_target,
@@ -16,6 +14,7 @@ use crate::ast_utils::{
 };
 use crate::detector_trait::{AnalysisContext, Detector};
 use crate::helpers::should_skip_access_control_warning;
+use crate::taint::{find_taint_violations, CfgStatementKind, TaintQuery};
 use crate::types::{Confidence, Finding, Severity};
 use tree_sitter::Node;
 
@@ -211,14 +210,49 @@ impl Detector for AccessControlDetector {
                 None => continue,
             };
 
-            // `func_text` is still required for the `should_skip_access_control_warning`
-            // call in helpers.rs, which performs self-service pattern detection.
             let func_text = node_text(func, ctx.source);
 
             // --- Check 1: Sensitive operation without access control ---
             //
-            // Uses AST call_expression nodes instead of keyword string matching.
-            if has_sensitive_operation(&body, ctx.source)
+            // CFG path: all paths from entry to StateWrite/InternalCallSensitive must pass a Guard.
+            let used_cfg_for_check1 = if let Some(cfg_ref) = ctx.cfg_for(func) {
+                let query = TaintQuery {
+                    sources: vec![CfgStatementKind::EntryBlock],
+                    sinks: vec![
+                        CfgStatementKind::StateWrite,
+                        CfgStatementKind::InternalCallSensitive,
+                    ],
+                    sanitizers: vec![CfgStatementKind::Guard],
+                };
+                for v in find_taint_violations(&cfg_ref, &query) {
+                    if should_skip_access_control_warning(name, &func_text) {
+                        continue;
+                    }
+                    let line = if v.sink_line > 0 {
+                        v.sink_line
+                    } else {
+                        v.source_line
+                    };
+                    findings.push(Finding::from_detector(
+                        self,
+                        line,
+                        Confidence::High,
+                        "Missing Access Control",
+                        format!(
+                            "Function '{}' has path to sensitive operation without access control",
+                            name
+                        ),
+                        "Add onlyOwner, onlyAdmin, or require(msg.sender == ...) guard",
+                    ));
+                }
+                true
+            } else {
+                false
+            };
+
+            // AST fallback for Check 1 when CFG is not available.
+            if !used_cfg_for_check1
+                && has_sensitive_operation(&body, ctx.source)
                 && !has_access_control(func, ctx.source)
             {
                 if should_skip_access_control_warning(name, func_text) {
@@ -309,7 +343,10 @@ contract C {
                 .iter()
                 .any(|f| f.vulnerability_type == "Missing Access Control"),
             "expected Missing Access Control for unguarded selfdestruct; got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -327,7 +364,10 @@ contract C {
                 .iter()
                 .any(|f| f.vulnerability_type == "Unrestricted Fund Transfer"),
             "expected Unrestricted Fund Transfer; got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -348,7 +388,10 @@ contract C {
                 .iter()
                 .any(|f| f.vulnerability_type == "Missing Access Control"),
             "expected Missing Access Control for unguarded pause(); got: {:?}",
-            findings.iter().map(|f| &f.vulnerability_type).collect::<Vec<_>>()
+            findings
+                .iter()
+                .map(|f| &f.vulnerability_type)
+                .collect::<Vec<_>>()
         );
     }
 

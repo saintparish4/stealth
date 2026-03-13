@@ -167,9 +167,8 @@ impl Detector for FrontRunningDetector {
                         vulnerability_type: "Front-Runnable Mint".to_string(),
                         message: "First-come-first-serve mint vulnerable to front-running"
                             .to_string(),
-                        suggestion:
-                            "Consider merkle proof whitelist or signature-based minting"
-                                .to_string(),
+                        suggestion: "Consider merkle proof whitelist or signature-based minting"
+                            .to_string(),
                         remediation: None,
                         owasp_category: self.owasp_category().map(|s| s.to_string()),
                         file: None,

@@ -243,9 +243,9 @@ contract CommentSelfdestructFP {
 }
 "#;
     let findings = run_detector(&AccessControlDetector, source);
-    let has_fp = findings
-        .iter()
-        .any(|f| f.detector_id == "access-control" && f.vulnerability_type == "Missing Access Control");
+    let has_fp = findings.iter().any(|f| {
+        f.detector_id == "access-control" && f.vulnerability_type == "Missing Access Control"
+    });
     assert!(
         !has_fp,
         "selfdestruct in comment must not trigger Missing Access Control"
@@ -267,9 +267,7 @@ contract StringSelfdestructFP {
 }
 "#;
     let findings = run_detector(&AccessControlDetector, source);
-    let has_fp = findings
-        .iter()
-        .any(|f| f.detector_id == "access-control");
+    let has_fp = findings.iter().any(|f| f.detector_id == "access-control");
     assert!(
         !has_fp,
         "selfdestruct in string literal must not trigger access-control detector"
@@ -293,9 +291,9 @@ contract VarNameFP {
 }
 "#;
     let findings = run_detector(&AccessControlDetector, source);
-    let has_fp = findings
-        .iter()
-        .any(|f| f.detector_id == "access-control" && f.vulnerability_type == "Missing Access Control");
+    let has_fp = findings.iter().any(|f| {
+        f.detector_id == "access-control" && f.vulnerability_type == "Missing Access Control"
+    });
     assert!(
         !has_fp,
         "variable named 'initialized' must not trigger Missing Access Control"

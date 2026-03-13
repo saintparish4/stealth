@@ -47,6 +47,7 @@ tree-sitter-language = "0.1.7"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 walkdir = "2.5.0"
+smallvec = "1.15.1"
 
 # CLI-only (optional)
 clap = { version = "4.5.59", features = ["derive"], optional = true }

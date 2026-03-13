@@ -971,6 +971,7 @@ dependencies = [
  "predicates",
  "serde",
  "serde_json",
+ "smallvec",
  "tokio",
  "tower-lsp",
  "tree-sitter",

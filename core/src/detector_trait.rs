@@ -6,10 +6,14 @@
 //! built once at startup and shared for the lifetime of the process.
 //!
 //! [`AnalysisContext`] is the read-only bundle passed to each [`Detector::run`] call.
-//! Phase S3 will extend it with an optional control flow graph.
+//! Phase S3 extends it with a lazy CFG cache; detectors that call [`AnalysisContext::cfg_for`]
+//! get a CFG per function on demand; others pay zero cost.
 
 use crate::ast_utils::find_nodes_of_kind;
+use crate::cfg::ControlFlowGraph;
 use crate::types::{Confidence, Finding, Severity};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use tree_sitter::{Node, Tree};
 
 // ---------------------------------------------------------------------------
@@ -19,8 +23,8 @@ use tree_sitter::{Node, Tree};
 /// Everything a detector needs to analyse one Solidity file.
 ///
 /// Passed by reference to [`Detector::run`]; detectors only read from it.
-/// Phase S3 will add `pub cfg: Option<&'a ControlFlowGraph>` here without
-/// requiring changes to existing detectors.
+/// CFGs are built lazily per function via [`AnalysisContext::cfg_for`]; detectors
+/// that do not call it pay no CFG cost.
 pub struct AnalysisContext<'a> {
     /// The fully parsed tree-sitter syntax tree for the file.
     pub tree: &'a Tree,
@@ -30,6 +34,9 @@ pub struct AnalysisContext<'a> {
     pub file_path: Option<&'a str>,
     /// Pre-computed `function_definition` nodes for efficient iteration.
     pub functions: Vec<Node<'a>>,
+    /// Lazy CFG cache keyed by function byte offset; only functions that request
+    /// a CFG get one built and cached.
+    cfgs: RefCell<HashMap<usize, ControlFlowGraph>>,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -44,6 +51,25 @@ impl<'a> AnalysisContext<'a> {
             source,
             file_path: None,
             functions,
+            cfgs: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Returns a reference to the CFG for the given function, building and caching it on first use.
+    /// Only builds CFGs for functions that request one; detectors that never call this pay zero cost.
+    /// Returns `None` if the CFG cannot be built (e.g. abstract/interface, inline assembly).
+    pub fn cfg_for(&self, func: &Node<'a>) -> Option<std::cell::Ref<'_, ControlFlowGraph>> {
+        let key = func.start_byte();
+        if !self.cfgs.borrow().contains_key(&key) {
+            if let Some(cfg) = ControlFlowGraph::build_for_function(self.tree, self.source, func) {
+                self.cfgs.borrow_mut().insert(key, cfg);
+            }
+        }
+        let guard = self.cfgs.borrow();
+        if guard.contains_key(&key) {
+            Some(std::cell::Ref::map(guard, |m| m.get(&key).unwrap()))
+        } else {
+            None
         }
     }
 
