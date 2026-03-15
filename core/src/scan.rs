@@ -6,6 +6,7 @@ use crate::detector_trait::{AnalysisContext, DetectorRegistry};
 use crate::suppression;
 use crate::types::{Finding, ScanError, ScanErrorKind, ScanOutcome, Severity, Statistics};
 use std::fs;
+use std::time::Instant;
 use walkdir::WalkDir;
 
 /// Create a new tree-sitter parser configured for Solidity.
@@ -19,14 +20,23 @@ pub fn new_solidity_parser() -> Result<tree_sitter::Parser, String> {
 
 /// Scan a single file using the provided registry.
 /// Returns `ScanOutcome` containing findings and any errors encountered.
+#[must_use]
 pub fn scan_file_with(
     file_path: &str,
     registry: &DetectorRegistry,
     parser: &mut tree_sitter::Parser,
 ) -> ScanOutcome {
+    let t0 = Instant::now();
+    tracing::debug!(
+        file = file_path,
+        detectors = registry.len(),
+        "scan start"
+    );
+
     let source = match fs::read_to_string(file_path) {
         Ok(c) => c,
         Err(e) => {
+            tracing::warn!(file = file_path, error = %e, "file read failed");
             return ScanOutcome {
                 findings: Vec::new(),
                 errors: vec![ScanError {
@@ -41,6 +51,7 @@ pub fn scan_file_with(
     let tree = match parser.parse(&source, None) {
         Some(t) => t,
         None => {
+            tracing::warn!(file = file_path, "tree-sitter parse returned None");
             return ScanOutcome {
                 findings: Vec::new(),
                 errors: vec![ScanError {
@@ -63,6 +74,13 @@ pub fn scan_file_with(
 
     let findings = suppression::filter_findings_by_inline_ignores(findings, &source);
 
+    tracing::info!(
+        file = file_path,
+        total_findings = findings.len(),
+        elapsed_ms = t0.elapsed().as_millis(),
+        "scan complete"
+    );
+
     ScanOutcome {
         findings,
         errors: Vec::new(),
@@ -71,6 +89,7 @@ pub fn scan_file_with(
 
 /// Scan a directory (optionally recursive) using a shared parser and registry.
 /// Returns aggregated `ScanOutcome` across all files.
+#[must_use]
 pub fn scan_directory_with(
     dir_path: &str,
     recursive: bool,
@@ -95,6 +114,7 @@ pub fn scan_directory_with(
     outcome
 }
 
+#[must_use]
 pub fn calculate_statistics(findings: &[Finding]) -> Statistics {
     let mut stats = Statistics::default();
 
@@ -117,6 +137,7 @@ pub fn calculate_statistics(findings: &[Finding]) -> Statistics {
 
 /// Map scan statistics to a process exit code.
 /// 0 = clean, 1 = low/medium only, 2 = high, 3 = critical.
+#[must_use]
 pub fn exit_code_for_stats(stats: &Statistics) -> i32 {
     if stats.critical > 0 {
         3

@@ -43,12 +43,40 @@ I built Stealth to address the false positive problem that plagues other securit
 
 ---
 
+## Analysis Pipeline
+
+```mermaid
+flowchart TD
+    Source["Solidity Source"] --> Parser["tree-sitter Parser"]
+    Parser --> AST["AST"]
+    AST --> Context["AnalysisContext\n(functions pre-computed)"]
+    Context --> CFG["CFG Builder\n(lazy, per-function)"]
+    CFG --> Taint["TaintAnalysis\n(forward dataflow)"]
+    Context --> Registry["DetectorRegistry"]
+    Registry --> D1["Reentrancy\n(CFG taint)"]
+    Registry --> D2["Access Control\n(AST + modifiers)"]
+    Registry --> D3["tx.origin / timestamp\n(member_expression)"]
+    Registry --> D4["... 10 more detectors"]
+    D1 --> Findings["Vec&lt;Finding&gt;"]
+    D2 --> Findings
+    D3 --> Findings
+    D4 --> Findings
+    Findings --> Suppression["Suppression Filter\n(stealth-ignore + baseline)"]
+    Suppression --> Output["Output Formatter\n(terminal / JSON / SARIF)"]
+```
+
+---
+
 ## Project Structure
 
 ```
 /core/              Rust scanner engine (binary + library)
   /src/
-    /detectors/     13 vulnerability detectors (separate files)
+    /detectors/     13 vulnerability detectors (Detector trait impls)
+    ast_utils.rs    Reusable tree-sitter AST helpers
+    cfg.rs          Intra-function control flow graph builder
+    taint.rs        Generic forward dataflow / taint analysis
+    detector_trait.rs  Detector trait, AnalysisContext, DetectorRegistry
     helpers.rs      Self-service + visibility utilities
     suppression.rs  Inline ignore + baseline filtering
     scan.rs         File and directory scanning

@@ -10,6 +10,11 @@ use stealth_scanner::*;
 #[command(about = "Smart contract security scanner for Solidity", long_about = None)]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
+    /// Enable verbose output: detector decisions, skipped files, suppressed findings.
+    /// Equivalent to setting RUST_LOG=debug.
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -27,8 +32,24 @@ enum Commands {
     },
 }
 
+fn init_tracing(verbose: bool) {
+    use tracing_subscriber::EnvFilter;
+
+    // RUST_LOG overrides --verbose if set; otherwise verbose → debug, default → warn.
+    let default_level = if verbose { "debug" } else { "warn" };
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(default_level));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .init();
+}
+
 fn main() {
     let cli = Cli::parse();
+    init_tracing(cli.verbose);
 
     match cli.command {
         Commands::Scan {

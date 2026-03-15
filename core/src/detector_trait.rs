@@ -14,6 +14,7 @@ use crate::cfg::ControlFlowGraph;
 use crate::types::{Confidence, Finding, Severity};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::Instant;
 use tree_sitter::{Node, Tree};
 
 // ---------------------------------------------------------------------------
@@ -67,7 +68,10 @@ impl<'a> AnalysisContext<'a> {
         }
         let guard = self.cfgs.borrow();
         if guard.contains_key(&key) {
-            Some(std::cell::Ref::map(guard, |m| m.get(&key).unwrap()))
+            Some(std::cell::Ref::map(guard, |m| {
+                m.get(&key)
+                    .expect("key was inserted above; map is not mutated between insert and borrow")
+            }))
         } else {
             None
         }
@@ -173,9 +177,22 @@ impl DetectorRegistry {
     }
 
     /// Run every detector and append findings to `findings`.
+    ///
+    /// Emits a `DEBUG` tracing event per detector reporting finding count and
+    /// elapsed time. These are no-ops when no tracing subscriber is installed.
     pub fn run_all(&self, ctx: &AnalysisContext<'_>, findings: &mut Vec<Finding>) {
+        let file = ctx.file_path.unwrap_or("<unknown>");
         for detector in &self.detectors {
+            let t0 = Instant::now();
+            let before = findings.len();
             detector.run(ctx, findings);
+            tracing::debug!(
+                detector = detector.id(),
+                file = file,
+                findings = findings.len() - before,
+                elapsed_ms = t0.elapsed().as_millis(),
+                "detector complete"
+            );
         }
     }
 }

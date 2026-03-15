@@ -4,6 +4,11 @@
 //! Module:  lsp (LSP-only — requires `lsp` feature).
 //! Module:  wasm (WASM-only — requires `wasm` feature).
 
+// Forbid silent panics from `.unwrap()` throughout library code.
+// Use `.expect("reason")` to document invariants, or propagate errors explicitly.
+// Test modules are exempt via `#[allow(clippy::unwrap_used)]` where needed.
+#![deny(clippy::unwrap_used)]
+
 pub mod ast_utils;
 pub mod cfg;
 pub mod detector_trait;

@@ -31,8 +31,8 @@ required-features = ["lsp"]
 
 [features]
 default = ["cli"]
-# cli: native binary with terminal colors, file I/O, directory walking
-cli = ["dep:clap", "dep:colored"]
+# cli: native binary with terminal colors, file I/O, directory walking, structured logging
+cli = ["dep:clap", "dep:colored", "dep:tracing-subscriber"]
 # codegen: enables ts-rs TypeScript type generation (CI / dev only)
 codegen = ["dep:ts-rs"]
 # wasm: browser/Node target via wasm-bindgen (no fs, no colored)
@@ -48,10 +48,14 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 walkdir = "2.5.0"
 smallvec = "1.15.1"
+# Structured logging — always present; zero cost when no subscriber is installed.
+tracing = "0.1.44"
 
 # CLI-only (optional)
 clap = { version = "4.5.59", features = ["derive"], optional = true }
 colored = { version = "3.1.1", optional = true }
+# CLI subscriber: formats and emits tracing events to stderr.
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"], optional = true }
 
 # WASM-only (optional)
 wasm-bindgen = { version = "0.2.108", optional = true }

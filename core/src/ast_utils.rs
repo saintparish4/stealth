@@ -381,6 +381,7 @@ pub fn is_proxy_contract(root: &Node, source: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::scan::new_solidity_parser;

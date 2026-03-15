@@ -158,6 +158,7 @@ pub enum ScanErrorKind {
     ParseError,
 }
 
+#[must_use]
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 pub struct ScanOutcome {
