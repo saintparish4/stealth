@@ -113,9 +113,9 @@ impl ControlFlowGraph {
                 ""
             };
             let exit_tag = if block.id == self.exit { " [exit]" } else { "" };
-            write!(f, "BB{}{}{}:\n", id, entry_tag, exit_tag)?;
+            writeln!(f, "BB{}{}{}:", id, entry_tag, exit_tag)?;
             for stmt in &block.statements {
-                write!(f, "  {}\n", stmt)?;
+                writeln!(f, "  {}", stmt)?;
             }
             if !block.successors.is_empty() {
                 let succs: Vec<String> = block
@@ -123,7 +123,7 @@ impl ControlFlowGraph {
                     .iter()
                     .map(|s| format!("BB{}", s.0))
                     .collect();
-                write!(f, "  -> {}\n", succs.join(", "))?;
+                writeln!(f, "  -> {}", succs.join(", "))?;
             }
         }
         Ok(())
@@ -253,7 +253,7 @@ impl ControlFlowGraph {
     /// Returns true if any block in the given set contains an `ExternalCall` statement.
     pub fn blocks_contain_external_call(&self, block_ids: &[BasicBlockId]) -> bool {
         block_ids.iter().any(|&id| {
-            self.block(id).map_or(false, |b| {
+            self.block(id).is_some_and(|b| {
                 b.statements
                     .iter()
                     .any(|s| matches!(s, CfgStatement::ExternalCall { .. }))

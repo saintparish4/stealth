@@ -134,4 +134,185 @@ mod tests {
             "expected at least one finding on comprehensive-vulnerabilities.sol"
         );
     }
+
+    /// Trust-anchor: reentrancy detector must report on call-before-state-write.
+    /// (Lib test so cargo-mutants runs it when mutating detector code.)
+    #[test]
+    fn reentrancy_detector_reports_on_vulnerable_snippet() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract Vuln {
+    mapping(address => uint256) public balances;
+    function withdraw(uint256 amount) public {
+        require(balances[msg.sender] >= amount);
+        (bool ok,) = msg.sender.call{value: amount}("");
+        require(ok);
+        balances[msg.sender] -= amount;
+    }
+}
+"#;
+        let mut parser = new_solidity_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        build_registry().run_all(&ctx, &mut findings);
+        let n = findings
+            .iter()
+            .filter(|f| f.detector_id == "reentrancy")
+            .count();
+        assert!(
+            n >= 1,
+            "reentrancy detector must report on vulnerable snippet; got {} findings",
+            n
+        );
+    }
+
+    /// Trust-anchor: access-control detector must report on unguarded selfdestruct.
+    #[test]
+    fn access_control_detector_reports_on_vulnerable_snippet() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract Vuln {
+    address public owner;
+    constructor() { owner = msg.sender; }
+    function destroy() public {
+        selfdestruct(payable(msg.sender));
+    }
+}
+"#;
+        let mut parser = new_solidity_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        build_registry().run_all(&ctx, &mut findings);
+        let n = findings
+            .iter()
+            .filter(|f| f.detector_id == "access-control")
+            .count();
+        assert!(
+            n >= 1,
+            "access-control detector must report on vulnerable snippet; got {} findings",
+            n
+        );
+    }
+
+    /// Trust-anchor: unchecked-calls detector must report when return value ignored.
+    #[test]
+    fn unchecked_calls_detector_reports_on_vulnerable_snippet() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract Vuln {
+    address owner;
+    constructor() { owner = msg.sender; }
+    function forward(address payable to) public {
+        require(msg.sender == owner);
+        to.call{value: address(this).balance}("");
+    }
+    receive() external payable {}
+}
+"#;
+        let mut parser = new_solidity_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        build_registry().run_all(&ctx, &mut findings);
+        let n = findings
+            .iter()
+            .filter(|f| f.detector_id == "unchecked-calls")
+            .count();
+        assert!(
+            n >= 1,
+            "unchecked-calls detector must report on vulnerable snippet; got {} findings",
+            n
+        );
+    }
+
+    /// Trust-anchor: tx-origin detector must report when tx.origin used for auth.
+    #[test]
+    fn tx_origin_detector_reports_on_vulnerable_snippet() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract Vuln {
+    address public owner;
+    constructor() { owner = msg.sender; }
+    function withdraw() public {
+        require(tx.origin == owner);
+        payable(owner).transfer(address(this).balance);
+    }
+    receive() external payable {}
+}
+"#;
+        let mut parser = new_solidity_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        build_registry().run_all(&ctx, &mut findings);
+        let n = findings
+            .iter()
+            .filter(|f| f.detector_id == "tx-origin")
+            .count();
+        assert!(
+            n >= 1,
+            "tx-origin detector must report on vulnerable snippet; got {} findings",
+            n
+        );
+    }
+
+    /// Trust-anchor: dangerous-delegatecall detector must report on user-controlled delegatecall.
+    #[test]
+    fn dangerous_delegatecall_detector_reports_on_vulnerable_snippet() {
+        let source = r#"
+pragma solidity ^0.8.0;
+contract Vuln {
+    function execute(address target, bytes memory data) public {
+        (bool ok,) = target.delegatecall(data);
+        require(ok);
+    }
+}
+"#;
+        let mut parser = new_solidity_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        build_registry().run_all(&ctx, &mut findings);
+        let n = findings
+            .iter()
+            .filter(|f| f.detector_id == "dangerous-delegatecall")
+            .count();
+        assert!(
+            n >= 1,
+            "dangerous-delegatecall detector must report on vulnerable snippet; got {} findings",
+            n
+        );
+    }
+
+    /// Trust-anchor: unchecked-erc20 detector must report on unchecked transfer().
+    #[test]
+    fn unchecked_erc20_detector_reports_on_vulnerable_snippet() {
+        let source = r#"
+pragma solidity ^0.8.0;
+interface IERC20 {
+    function transfer(address to, uint256 amount) external returns (bool);
+}
+contract Vuln {
+    function pay(address token, address to, uint256 amt) public {
+        IERC20(token).transfer(to, amt);
+    }
+}
+"#;
+        let mut parser = new_solidity_parser().expect("parser");
+        let tree = parser.parse(source, None).expect("parse");
+        let ctx = AnalysisContext::new(&tree, source);
+        let mut findings = Vec::new();
+        build_registry().run_all(&ctx, &mut findings);
+        let n = findings
+            .iter()
+            .filter(|f| f.detector_id == "unchecked-erc20")
+            .count();
+        assert!(
+            n >= 1,
+            "unchecked-erc20 detector must report on vulnerable snippet; got {} findings",
+            n
+        );
+    }
 }

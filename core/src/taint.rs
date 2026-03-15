@@ -72,21 +72,11 @@ fn byte_offset_of(stmt: &CfgStatement) -> usize {
 }
 
 /// Taint state along a path: tainted flag plus source location for reporting.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 struct TaintState {
     tainted: bool,
     source_byte: usize,
     source_line: usize,
-}
-
-impl Default for TaintState {
-    fn default() -> Self {
-        Self {
-            tainted: false,
-            source_byte: 0,
-            source_line: 0,
-        }
-    }
 }
 
 fn merge_state(a: TaintState, b: TaintState) -> TaintState {

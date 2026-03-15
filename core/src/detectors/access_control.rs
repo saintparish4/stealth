@@ -225,7 +225,7 @@ impl Detector for AccessControlDetector {
                     sanitizers: vec![CfgStatementKind::Guard],
                 };
                 for v in find_taint_violations(&cfg_ref, &query) {
-                    if should_skip_access_control_warning(name, &func_text) {
+                    if should_skip_access_control_warning(name, func_text) {
                         continue;
                     }
                     let line = if v.sink_line > 0 {

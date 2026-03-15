@@ -1,4 +1,4 @@
-.PHONY: help build build-release check fmt clippy run scan scan-debug verify clean test test-unit test-integration
+.PHONY: help build build-release check fmt clippy run scan scan-debug verify clean test test-unit test-integration bench
 
 # Variables
 CARGO = cargo
@@ -24,6 +24,7 @@ help:
 	@echo "  make verify         - Run verification tests"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make test           - Alias for verify"
+	@echo "  make bench          - Run criterion benchmarks"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build-release"
@@ -113,6 +114,11 @@ verify: build-release
 	cd $(CORE_DIR) && bash verify.sh
 
 test: test-unit
+
+# Benchmark target
+bench:
+	@echo "Running benchmarks..."
+	cd $(CORE_DIR) && $(CARGO) bench
 
 # Clean target
 clean:

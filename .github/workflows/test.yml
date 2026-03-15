@@ -44,6 +44,16 @@ jobs:
           cargo build --release
           cargo test --test cli_integration --test snapshots
 
+      - name: Run benchmarks
+        run: cd core && cargo bench -- --output-format bencher | tee benchmark_results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: core/target/criterion/
+          retention-days: 30
+
   web-checks:
     name: Web (Next.js)
     runs-on: ubuntu-latest

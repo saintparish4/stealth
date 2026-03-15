@@ -5,6 +5,8 @@ target/
 
 # Tests
 core/tests/snapshots/
+core/mutants.out
+core/mutants.out.old
 
 # Cargo
 # Cargo.lock should be committed for binary projects (like this one)
